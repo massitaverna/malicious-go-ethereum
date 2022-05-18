@@ -1,12 +1,15 @@
 package attack
 
 import "fmt"
+import "time"
 
 const (
 	colorReset  = "\033[0m"
-	colorPurple = "\033[35m"
+	colorPurple = "\033[37;41m"
 )
 
-func Log(a ...interface{}) (n int, err error) {
-	return fmt.Println(colorPurple, "ATCK ", colorReset, a)
+func Log(a ...interface{}) {
+	timestamp := time.Now().Format("[01-02|15:04:05.000]")
+	fmt.Print(colorPurple + "ATCK" + colorReset + " " + timestamp + " ")
+	fmt.Println(a...)
 }
