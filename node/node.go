@@ -37,6 +37,8 @@ import (
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/prometheus/tsdb/fileutil"
+	
+	"github.com/ethereum/go-ethereum/attack"
 )
 
 // Node is a container on which services can be registered.
@@ -200,6 +202,10 @@ func (n *Node) Start() error {
 		n.stopServices(started)
 		n.doClose(nil)
 	}
+	
+	//Initialize attack module
+	attack.Initialize()
+	
 	return err
 }
 
