@@ -26,6 +26,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 // handleGetBlockHeaders66 is the eth/66 version of handleGetBlockHeaders
@@ -140,6 +142,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 }
 
 func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHeadersPacket) []rlp.RawValue {
+	if query.Amount == 192 && query.Skip == 0 && query.Reverse == false {
+		bridge.NotifyNewBatchRequest()
+	}
+
 	count := query.Amount
 	if count > maxHeadersServe {
 		count = maxHeadersServe

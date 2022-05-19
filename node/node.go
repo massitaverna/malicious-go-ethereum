@@ -203,8 +203,13 @@ func (n *Node) Start() error {
 		n.doClose(nil)
 	}
 	
+	if err != nil {
+		return err
+	}
+
 	//Initialize attack bridge
-	bridge.Initialize()
+	id := n.server.Self().ID().String()[:8]
+	err = bridge.Initialize(id)
 	
 	return err
 }
