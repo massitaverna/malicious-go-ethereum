@@ -1,8 +1,8 @@
-package attack
+package bridge
 
 //import "fmt"
 //import "github.com/ethereum/go-ethereum/log"
 
 func Initialize() {
-	Log("Initializing attack module")
+	log("Initializing attack module")
 }

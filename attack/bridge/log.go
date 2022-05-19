@@ -1,4 +1,4 @@
-package attack
+package bridge
 
 import "fmt"
 import "time"
@@ -8,7 +8,7 @@ const (
 	colorPurple = "\033[37;41m"
 )
 
-func Log(a ...interface{}) {
+func log(a ...interface{}) {
 	timestamp := time.Now().Format("[01-02|15:04:05.000]")
 	fmt.Print(colorPurple + "ATCK" + colorReset + " " + timestamp + " ")
 	fmt.Println(a...)
