@@ -12,7 +12,6 @@ const (
 var conn net.Conn
 
 
-
 func Initialize(id string) error {
 	conn, err := net.Dial("tcp", ADDR+":"+PORT)
 	if err != nil {
