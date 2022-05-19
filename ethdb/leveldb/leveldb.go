@@ -149,6 +149,12 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	return ldb, nil
 }
 
+func NewSimple(db *leveldb.DB) *Database {
+	return &Database{
+		db: db,
+	}
+}
+
 // configureOptions sets some default options, then runs the provided setter.
 func configureOptions(customizeFn func(*opt.Options)) *opt.Options {
 	// Set default options
