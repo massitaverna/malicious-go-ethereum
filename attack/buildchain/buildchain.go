@@ -47,6 +47,7 @@ func BuildChain(n int) error {
 	}
 
 	engine := ethash.New(ethashConfig, nil, true)
+	fmt.Println("Generating ethash cache... this may take few minutes")
 
 	// Create/open database
 	if err := setChainDbPath(); err != nil {
@@ -86,7 +87,7 @@ func BuildChain(n int) error {
 	lastHeader := genesisHeader
 	td := new(big.Int).Set(genesisHeader.Difficulty)
 
-	numSealed := 0
+	numSealed := 1 // Genesis block is always "sealed"
 
 	for i := 1; i <= n; i++ {
 		currHeader := &types.Header{
@@ -110,14 +111,17 @@ func BuildChain(n int) error {
 		results := make(chan *types.Block)
 		stop := make(chan struct{})
 		err = engine.Seal(nil, types.NewBlockWithHeader(currHeader), results, stop)
-		sealedBlock := <-results
-		sealedHeader := sealedBlock.Header()
 		if err != nil {
 			fmt.Println("Could not seal block with header:")
 			fmt.Println(currHeader)
 			fmt.Println("err =", err)
 			return err
 		}
+		if i == 1 {
+			fmt.Println("ethash cache generated")
+		}
+		sealedBlock := <-results
+		sealedHeader := sealedBlock.Header()
 
 		//headers = append(headers, sealedHeader)
 
@@ -127,7 +131,7 @@ func BuildChain(n int) error {
 		//Print progress statistics
 		numSealed++
 		if numSealed % (n/100) == 0 {
-			fmt.Print(numSealed/(n/100), "\b%... ")
+			fmt.Print(numSealed/(n/100), "%... ")
 		}
 	}
 	fmt.Println("")
