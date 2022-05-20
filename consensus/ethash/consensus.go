@@ -34,6 +34,7 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/log"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -332,6 +333,10 @@ func (ethash *Ethash) CalcDifficulty(chain consensus.ChainHeaderReader, time uin
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
 func CalcDifficulty(config *params.ChainConfig, time uint64, parent *types.Header) *big.Int {
+	if params.MinimumDifficulty.Uint64() < 131072 {
+		log.Warn("Using custom minimum difficulty", "min_diff", params.MinimumDifficulty.Uint64())
+	}
+
 	next := new(big.Int).Add(parent.Number, big1)
 	switch {
 	case config.IsArrowGlacier(next):

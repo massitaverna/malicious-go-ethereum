@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"os"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common"
@@ -14,7 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
-const minimumDifficulty = 131072
 var PredictionChainDbPath string
 
 
@@ -73,7 +73,7 @@ func BuildChain(n int) error {
 		TxHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		Bloom: types.BytesToBloom(common.FromHex("0x0")),
-		Difficulty: big.NewInt(minimumDifficulty),
+		Difficulty: params.MinimumDifficulty,
 		Number: big.NewInt(0),
 		GasLimit: uint64(3141592),
 		GasUsed: uint64(0),
@@ -98,7 +98,7 @@ func BuildChain(n int) error {
 			TxHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			Bloom: types.BytesToBloom(common.FromHex("0x0")),
-			Difficulty: big.NewInt(minimumDifficulty),
+			Difficulty: params.MinimumDifficulty,
 			Number: big.NewInt(0).Add(lastHeader.Number, big.NewInt(1)),
 			GasLimit: uint64(3141592),
 			GasUsed: uint64(0),
@@ -117,11 +117,13 @@ func BuildChain(n int) error {
 			fmt.Println("err =", err)
 			return err
 		}
+
+		sealedBlock := <-results
+		sealedHeader := sealedBlock.Header()
+		
 		if i == 1 {
 			fmt.Println("ethash cache generated")
 		}
-		sealedBlock := <-results
-		sealedHeader := sealedBlock.Header()
 
 		//headers = append(headers, sealedHeader)
 
