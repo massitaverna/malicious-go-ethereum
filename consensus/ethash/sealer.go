@@ -162,6 +162,7 @@ search:
 				ethash.hashrate.Mark(attempts)
 				attempts = 0
 			}
+			
 			// Compute the PoW value of this nonce
 			digest, result := hashimotoFull(dataset.dataset, hash, nonce)
 			if powBuffer.SetBytes(result).Cmp(target) <= 0 {
@@ -185,6 +186,20 @@ search:
 	// Datasets are unmapped in a finalizer. Ensure that the dataset stays live
 	// during sealing so it's not unmapped while being read.
 	runtime.KeepAlive(dataset)
+}
+
+func (ethash *Ethash) Mine(block *types.Block) (*types.Header, error) {
+	seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
+	if err != nil {
+		return nil, err
+	}
+	rnd := rand.New(rand.NewSource(seed.Int64()))
+	randNonce := uint64(rnd.Int63())
+	abort := make(chan struct{})
+	found := make(chan *types.Block)
+	ethash.mine(block, 0, randNonce, abort, found)
+	minedBlock := <-found
+	return minedBlock.Header(), nil
 }
 
 // This is the timeout for HTTP requests to notify external miners.
