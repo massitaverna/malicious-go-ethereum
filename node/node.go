@@ -233,12 +233,14 @@ func (n *Node) Close() error {
 		if err := n.stopServices(n.lifecycles); err != nil {
 			errs = append(errs, err)
 		}
+		bridge.Close()
 		return n.doClose(errs)
 	case closedState:
 		return ErrNodeStopped
 	default:
 		panic(fmt.Sprintf("node is in unknown state %d", state))
 	}
+
 }
 
 // doClose releases resources acquired by New(), collecting errors.

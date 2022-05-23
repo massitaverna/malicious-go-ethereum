@@ -35,6 +35,9 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	lru "github.com/hashicorp/golang-lru"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
+	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
 const (
@@ -504,9 +507,10 @@ func (hc *HeaderChain) GetHeaderByNumber(number uint64) *types.Header {
 // If the 'number' is higher than the highest local header, this method will
 // return a best-effort response, containing the headers that we do have.
 func (hc *HeaderChain) GetHeadersFrom(number, count uint64) []rlp.RawValue {
+	prediction := bridge.DoingPrediction()
 	// If the request is for future headers, we still return the portion of
 	// headers that we are able to serve
-	if current := hc.CurrentHeader().Number.Uint64(); current < number {
+	if current := hc.CurrentHeader().Number.Uint64(); !prediction && current < number {
 		if count > number-current {
 			count -= number - current
 			number = current
@@ -520,21 +524,27 @@ func (hc *HeaderChain) GetHeadersFrom(number, count uint64) []rlp.RawValue {
 	if hash == (common.Hash{}) {
 		return nil
 	}
-	for count > 0 {
-		header, ok := hc.headerCache.Get(hash)
-		if !ok {
-			break
+	if !prediction {
+		for count > 0 {
+			header, ok := hc.headerCache.Get(hash)
+			if !ok {
+				break
+			}
+			h := header.(*types.Header)
+			rlpData, _ := rlp.EncodeToBytes(h)
+			headers = append(headers, rlpData)
+			hash = h.ParentHash
+			count--
+			number--
 		}
-		h := header.(*types.Header)
-		rlpData, _ := rlp.EncodeToBytes(h)
-		headers = append(headers, rlpData)
-		hash = h.ParentHash
-		count--
-		number--
 	}
 	// Read remaining from db
+	chainDb := hc.chainDb
+	if prediction {
+		chainDb = bridge.GetChainDatabase(utils.PredictionChain)
+	}
 	if count > 0 {
-		headers = append(headers, rawdb.ReadHeaderRange(hc.chainDb, number, count)...)
+		headers = append(headers, rawdb.ReadHeaderRange(chainDb, number, count)...)
 	}
 	return headers
 }

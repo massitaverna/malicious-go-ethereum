@@ -2,41 +2,107 @@ package buildchain
 
 import (
 	"fmt"
+	"math"
 	"math/big"
 	"os"
+	"encoding/binary"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	ethdbLeveldb "github.com/ethereum/go-ethereum/ethdb/leveldb"
 	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
-var PredictionChainDbPath string
+var chainDbPath string
+var dbIdPath string
+var ethashDatasetDir string
 
 
-func setChainDbPath() error {
+func setChainDbPath(chainType utils.ChainType) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	pathSeparator := string(os.PathSeparator)
-	PredictionChainDbPath = home + pathSeparator + ".buildchain" + pathSeparator + "prediction_chain_db"
+	chainDbPath = home + pathSeparator + ".buildchain" + pathSeparator + chainType.GetDir()
+	dbIdPath = chainDbPath + pathSeparator + "db_id"
 	return nil
 }
 
-func BuildChain(n int) error {
+func setEthashDatasetDir() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	pathSeparator := string(os.PathSeparator)
+	ethashDatasetDir = home + pathSeparator + ".buildchain" + pathSeparator + "ethash"
+	return nil
+}
 
-	// Enable geth logs if debugging
+func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
+	// Create/open database
+	if err := setChainDbPath(chainType); err != nil {
+		return err
+	}
+
+	if overwrite {
+		err := resetDatabase(chainDbPath)
+		if err != nil {
+			return err
+		}
+	}
+	db, err := leveldb.OpenFile(chainDbPath, &opt.Options{ErrorIfExist: true})
+	if err == os.ErrExist {
+		dbId, errf := loadId(dbIdPath)
+		if errf != nil {
+			fmt.Println("Could not load database ID of an already existing database")
+			return errf
+		}
+		if dbId == computeId(length) {
+			fmt.Println("The chain is already built and ready to use")
+			return nil
+		} else {
+			fmt.Println("Another chain is stored at " + chainDbPath)
+			fmt.Println("To override it, run your command with the flag --overwrite")
+			return os.ErrExist
+		}
+	}
+	if err != nil {
+		fmt.Println("An error happened opening the database")
+		return err
+	}
+
+	err = storeId(dbIdPath, computeId(length))
+	if err != nil {
+		fmt.Println("Could not store ID of newly created database")
+		return err
+	}
+
+	success := true
+	defer func() {
+		db.Close()
+		if !success {
+			resetDatabase(chainDbPath)
+		}
+	}()
+
+	// Enable geth logs
 	if utils.Debug {
 		log.Root().SetHandler(log.LvlFilterHandler(log.LvlTrace, log.StdoutHandler))
 	}
 
 	// Create consensus engine
+	if err := setEthashDatasetDir(); err != nil {
+		return err
+	}
+
 	ethashConfig := ethash.Config{
+		DatasetDir:       ethashDatasetDir,
 		CacheDir:         "ethash",
 		CachesInMem:      2,
 		CachesOnDisk:     3,
@@ -47,18 +113,8 @@ func BuildChain(n int) error {
 	}
 
 	engine := ethash.New(ethashConfig, nil, true)
-	fmt.Println("Generating ethash cache... this may take few minutes")
+	fmt.Println("If ethash DAG is absent, it will be generated now. This may take few minutes.")
 
-	// Create/open database
-	if err := setChainDbPath(); err != nil {
-		return err
-	}
-
-	db, err := leveldb.OpenFile(PredictionChainDbPath, nil)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
 
 	dbWrapper := ethdbLeveldb.NewSimple(db)
 	batch := dbWrapper.NewBatch()				// Batch object to write to database
@@ -87,9 +143,9 @@ func BuildChain(n int) error {
 	lastHeader := genesisHeader
 	td := new(big.Int).Set(genesisHeader.Difficulty)
 
-	numSealed := 1 // Genesis block is always "sealed"
+	numDone := 1 // Genesis block is already done
 
-	for i := 1; i <= n; i++ {
+	for i := 1; i <= length; i++ {
 		currHeader := &types.Header{
 			ParentHash: lastHeader.Hash(),
 			UncleHash: common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
@@ -114,26 +170,26 @@ func BuildChain(n int) error {
 		if err != nil {
 			fmt.Println("Could not seal block with header:")
 			fmt.Println(currHeader)
-			fmt.Println("err =", err)
+			success = false
 			return err
 		}
 
 		sealedBlock := <-results
-		sealedHeader := sealedBlock.Header()
+		//sealedHeader := sealedBlock.Header()
 		
 		if i == 1 {
-			fmt.Println("ethash cache generated")
+			fmt.Println("Ethash DAG generated")
 		}
 
 		//headers = append(headers, sealedHeader)
 
-		rawdb.WriteTd(batch, sealedHeader.Hash(), sealedHeader.Number.Uint64(), td)
-		rawdb.WriteHeader(batch, sealedHeader)
+		rawdb.WriteTd(batch, sealedBlock.Hash(), sealedBlock.NumberU64(), td)
+		rawdb.WriteBlock(batch, sealedBlock)
 
 		//Print progress statistics
-		numSealed++
-		if numSealed % (n/100) == 0 {
-			fmt.Print(numSealed/(n/100), "%... ")
+		numDone++
+		if numDone % int((math.Ceil(float64(length)/100))) == 0 {
+			fmt.Print(numDone/int(math.Ceil(float64(length)/100)), "%... ")
 		}
 	}
 	fmt.Println("")
@@ -142,10 +198,39 @@ func BuildChain(n int) error {
 	err = batch.Write()
 	if err != nil {
 		fmt.Println("Could not write chain to disk")
-		fmt.Println("err =", err)
+		success = false
 		return err
 	}
 
-	fmt.Println("Created chain of", n, "blocks and stored to disk")
+	fmt.Println("Created chain of", length, "blocks and stored to disk")
 	return nil
+}
+
+func computeId(length int) uint64 {
+	return uint64(length)
+}
+
+func storeId(path string, id uint64) error {
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, uint64(id))
+	err := os.WriteFile(path, buf, 0644)
+	return err
+}
+
+func loadId(path string) (uint64, error) {
+	dbId, err := os.ReadFile(dbIdPath)
+	if err != nil {
+		return 0, err
+	}
+
+	return binary.BigEndian.Uint64(dbId), nil
+}
+
+func resetDatabase(path string) error {
+	err := os.RemoveAll(path)
+	if err != nil {
+		fmt.Println("An unexpected error occurred")
+		fmt.Println("You may want to delete " + path + "manually")
+	}
+	return err
 }
