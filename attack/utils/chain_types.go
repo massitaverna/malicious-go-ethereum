@@ -3,6 +3,7 @@ package utils
 type ChainType byte
 
 const (
+	InvalidChainType = ChainType(0)
 	PredictionChain = ChainType(1)
 	OtherChain = ChainType(2)
 )

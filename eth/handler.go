@@ -39,6 +39,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/p2p"
 	"github.com/ethereum/go-ethereum/params"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 const (
@@ -367,6 +369,9 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 			return err
 		}
 	}
+
+	bridge.NewPeerJoined(peer.Peer)
+
 	h.chainSync.handlePeerEvent(peer)
 
 	// Propagate existing transactions. new transactions appearing

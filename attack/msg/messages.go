@@ -1,9 +1,89 @@
 package msg
 
+import "encoding/binary"
+
+type Message struct {
+	Code byte
+	Content []byte
+}
+
 var (
-	PeerDropped = byte(0)
-	GotNewBatchRequest = byte(1)
-	NextPhase = byte(2)
-	EnableCheatAboutTd = byte(3)
-	DisableCheatAboutTd = byte(4)
+	/*PeerDropped = &Message{
+		Code: 0,
+		Content: nil
+	}
+	*/
+	BatchRequestServed = &Message{
+		Code: 1,
+		Content: []byte{0, 0, 0, 0},
+	}
+	NextPhase = &Message{
+		Code: 2,
+		Content: nil,
+	}
+	SetCheatAboutTd = &Message{
+		Code: 3,
+		Content: []byte{0},
+	}
+	SetNumBatches = &Message{
+		Code: 4,
+		Content: []byte{0, 0, 0, 0},
+	}
+	OracleBit = &Message{
+		Code: 5,
+		Content: []byte{0},
+	}
+	MasterPeer = &Message{
+		Code: 6,
+		Content: nil,
+	}
+	SetVictim = &Message{
+		Code: 7,
+		Content: []byte("00000000"),
+	}
+	NewMaliciousPeer = &Message{
+		Code: 8,
+		Content: []byte("00000000"),
+	}
+	SetAttackPhase = &Message{
+		Code: 9,
+		Content: []byte{0},
+	}
+	Terminate = &Message{
+		Code: 10,
+		Content: []byte{0},
+	}
+
 )
+
+func (m *Message) SetContent(c []byte) *Message {
+	contentCopy := make([]byte, len(c))
+	copy(contentCopy, c)
+	return &Message{
+		Code: m.Code,
+		Content: contentCopy,
+	}
+}
+
+func (m *Message) Encode() []byte {
+	result := make([]byte, 4)
+	length := uint32(len(m.Content) + 1)				// m.code takes 1 byte
+	binary.BigEndian.PutUint32(result, length)
+	result = append(result, m.Code)
+	result = append(result, m.Content...)
+	return result
+}
+
+func Decode(messageAsBytes []byte) *Message {
+	length := binary.BigEndian.Uint32(messageAsBytes[:4])
+	code := messageAsBytes[4]
+	content := make([]byte, length-1)
+	copy(content, messageAsBytes[5:])
+	if len(content) != int(length) - 1 {
+		return nil
+	}
+	return &Message{
+		Code: code,
+		Content: content,
+	}
+}

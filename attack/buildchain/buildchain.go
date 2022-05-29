@@ -137,11 +137,18 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 		Extra: make([]byte, 0),
 		MixDigest: common.HexToHash("0x0"),
 		Nonce: types.EncodeNonce(uint64(0x2763ab980cd417ef)),
+		//BaseFee: big.NewInt(1000000000),
 	}
+
 
 	//headers := []*types.Header{genesisHeader}
 	lastHeader := genesisHeader
 	td := new(big.Int).Set(genesisHeader.Difficulty)
+
+	genesisBlock := types.NewBlockWithHeader(genesisHeader)
+	rawdb.WriteTd(batch, genesisBlock.Hash(), genesisBlock.NumberU64(), td)
+	rawdb.WriteBlock(batch, genesisBlock)
+	rawdb.WriteCanonicalHash(batch, genesisHeader.Hash(), genesisHeader.Number.Uint64())
 
 	numDone := 1 // Genesis block is already done
 
@@ -160,31 +167,39 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 			GasUsed: uint64(0),
 			Time: lastHeader.Time + uint64(13),
 			Extra: make([]byte, 0),
+			//BaseFee: lastHeader.BaseFee,
 		}
-		lastHeader = currHeader
 		td.Add(td, currHeader.Difficulty)
 
-		results := make(chan *types.Block)
-		stop := make(chan struct{})
-		err = engine.Seal(nil, types.NewBlockWithHeader(currHeader), results, stop)
-		if err != nil {
-			fmt.Println("Could not seal block with header:")
-			fmt.Println(currHeader)
-			success = false
-			return err
-		}
+		block := types.NewBlockWithHeader(currHeader)
 
-		sealedBlock := <-results
-		//sealedHeader := sealedBlock.Header()
+		// Seal the block if we are not building the prediction chain or
+		// we are not in the first 50 blocks of the last batch
+		if chainType!=utils.PredictionChain || !(length - utils.BatchSize < i && i <= length - utils.BatchSize + 50) {
+			results := make(chan *types.Block)
+			stop := make(chan struct{})
+			err = engine.Seal(nil, block, results, stop)
+			if err != nil {
+				fmt.Println("Could not seal block with header:")
+				fmt.Println(currHeader)
+				success = false
+				return err
+			}
+
+			block = <-results
+		}
 		
 		if i == 1 {
 			fmt.Println("Ethash DAG generated")
 		}
 
 		//headers = append(headers, sealedHeader)
+		lastHeader = block.Header()
 
-		rawdb.WriteTd(batch, sealedBlock.Hash(), sealedBlock.NumberU64(), td)
-		rawdb.WriteBlock(batch, sealedBlock)
+		rawdb.WriteTd(batch, block.Hash(), block.NumberU64(), td)
+		rawdb.WriteBlock(batch, block)
+		rawdb.WriteCanonicalHash(batch, lastHeader.Hash(), lastHeader.Number.Uint64())
+
 
 		//Print progress statistics
 		numDone++
@@ -193,6 +208,8 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 		}
 	}
 	fmt.Println("")
+
+	rawdb.WriteHeadHeaderHash(batch, lastHeader.Hash())
 
 	// Write batch to disk
 	err = batch.Write()

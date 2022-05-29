@@ -33,7 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
 
-	"github.com/ethereum/go-ethereum/attack/bridge"
+	//"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 var (
@@ -119,6 +119,7 @@ type Peer struct {
 	// events receives message send / receive events if set
 	events   *event.Feed
 	testPipe *MsgPipeRW // for testing
+	Dropped chan bool
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -275,7 +276,8 @@ loop:
 			if r, ok := err.(DiscReason); ok {
 				remoteRequested = true
 				reason = r
-				bridge.NotifyDrop()
+				//bridge.PeerDropped()
+				p.Dropped <- true
 			} else {
 				reason = DiscNetworkError
 			}

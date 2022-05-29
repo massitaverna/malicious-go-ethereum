@@ -42,12 +42,17 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 
 	var status StatusPacket // safe to read after two values have been received from errc
 
-	higherTd, mustCheat, errb := bridge.CheatAboutTd()
+	higherTd, mustCheat, errb := bridge.CheatAboutTd(p.Peer.ID().String()[:8])
 	if errb != nil {
 		return errb
 	}
 	if mustCheat {
+		/*
+		higherHead, _ := bridge.GetHigherHeadAndPivot()
+		head = higherHead.Hash()
+		*/
 		td = higherTd
+		head = bridge.Latest().Hash()
 	}
 	go func() {
 		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
