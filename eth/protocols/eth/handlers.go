@@ -77,8 +77,11 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 
 	}
 	*/
+
+	lastInvalidBatch := false
 	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 	   	if bridge.LastInvalidBatch(q.Origin.Number) {
+	   		lastInvalidBatch = true
 	   		if !bridge.MustDisconnectVictim() {
 	   															// If we must not disconnect the victim,
 	   															// we don't provide the invalid batch which
@@ -88,7 +91,6 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	   		} else {
 	   			log.Info("Request for invalid batch", "status", "serving")
 	   		}
-	   		bridge.TerminatingSyncOp()
 	   	}
 
 	   	if !bridge.BatchExists(q.Origin.Number) {
@@ -98,6 +100,11 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	}
 
 	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
+	
+	if lastInvalidBatch {
+		log.Info("Served last invalid batch")
+		bridge.TerminatingSyncOp()
+	}
 	return peer.ReplyBlockHeadersRLP(query.RequestId, response)
 }
 

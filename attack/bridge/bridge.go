@@ -36,6 +36,8 @@ var mustDisconnectVictim chan bool
 var readyToDisconnect chan bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
+var syncOpLock sync.Mutex
+var syncOpTerminated bool
 
 
 func Initialize(id string) error {
@@ -245,6 +247,7 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 					log("Quitting")
 					return
 				}
+				victim.SetMustNotifyDrop(false)
 				timeout.Stop()
 				victimLock.Lock()
 				SendOracleBit(bit)
@@ -252,10 +255,12 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 					if victim == nil {
 						log("Victim should not be nil here")
 					}
-					mustDisconnectVictim <- true
+					mustDisconnectVictim <- true // It should be rather called 'mustProvideLastInvalidBatch'
+												 // Or 'mustForceVictimToDisconnect'
 					
 				} else {
 					mustDisconnectVictim <- false
+					TerminatingSyncOp()
 				}
 
 				// Since we disconnect, the Peer object referencing the victim cannot be use any longer
@@ -266,6 +271,11 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 				servedBatches = make([]bool, numServedBatches) // Reset all values to false
 				numServedBatches = 0
 				log("Reset victim: victim =", victim, "&victim =", &victim)
+
+				syncOpLock.Lock()
+				syncOpTerminated = false
+				syncOpLock.Unlock()
+
 				victimLock.Unlock()
 
 			}()
@@ -415,12 +425,23 @@ func LastInvalidBatch(from uint64) bool {
 }
 
 func TerminatingSyncOp() {
-	if master {
+	if !master {
+		return
+	}
+
+	syncOpLock.Lock()
+	if !syncOpTerminated {
+		log("SyncOp terminated")
+		syncOpTerminated = true
+		syncOpLock.Unlock()
 		go func() {
 			timeout := time.NewTimer(3*time.Second)
 			<-timeout.C
+			log("readyToDisconnect populated")
 			readyToDisconnect <- true
 		}()
+	} else {
+		syncOpLock.Unlock()
 	}
 }
 

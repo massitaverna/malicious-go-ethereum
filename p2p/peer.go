@@ -120,6 +120,8 @@ type Peer struct {
 	events   *event.Feed
 	testPipe *MsgPipeRW // for testing
 	Dropped chan bool
+	mustNotifyDrop bool
+	dropLock sync.Mutex
 }
 
 // NewPeer returns a peer for testing purposes.
@@ -210,10 +212,13 @@ func (p *Peer) Disconnect(reason DiscReason) {
 		p.testPipe.Close()
 	}
 
+	log.Info("Disconnecting", "peer", p.String())
 	select {
 	case p.disc <- reason:
 	case <-p.closed:
 	}
+	log.Info("Disconnected", "peer", p.String())
+
 }
 
 // String implements fmt.Stringer.
@@ -237,6 +242,7 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
 		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
+		mustNotifyDrop: true,
 	}
 	return p
 }
@@ -244,6 +250,13 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 func (p *Peer) Log() log.Logger {
 	return p.log
 }
+
+func (p *Peer) SetMustNotifyDrop(v bool) {
+	p.dropLock.Lock()
+	defer p.dropLock.Unlock()
+	p.mustNotifyDrop = v
+}
+
 
 func (p *Peer) run() (remoteRequested bool, err error) {
 	var (
@@ -263,8 +276,10 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 	// Wait for an error or disconnect.
 loop:
 	for {
+		log.Error("FOR")
 		select {
 		case err = <-writeErr:
+			log.Error("Write")
 			// A write finished. Allow the next write to start if
 			// there was no error.
 			if err != nil {
@@ -273,25 +288,34 @@ loop:
 			}
 			writeStart <- struct{}{}
 		case err = <-readErr:
+			log.Error("Read")
 			if r, ok := err.(DiscReason); ok {
 				remoteRequested = true
 				reason = r
-				//bridge.PeerDropped()
-				p.Dropped <- true
+				p.dropLock.Lock()
+				if p.mustNotifyDrop {
+					p.mustNotifyDrop = false
+					p.Dropped <- true
+				}
+				p.dropLock.Unlock()
 			} else {
 				reason = DiscNetworkError
 			}
 			break loop
 		case err = <-p.protoErr:
+			log.Error("Proto")
 			reason = discReasonForError(err)
 			break loop
 		case err = <-p.disc:
+			log.Error("Disc")
 			reason = discReasonForError(err)
 			break loop
 		}
 	}
 
+	log.Error("Closing p.closed")
 	close(p.closed)
+	log.Error("Closed p.closed")
 	p.rw.close(reason)
 	p.wg.Wait()
 	return remoteRequested, err
