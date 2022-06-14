@@ -242,7 +242,7 @@ func newPeer(log log.Logger, conn *conn, protocols []Protocol) *Peer {
 		protoErr: make(chan error, len(protomap)+1), // protocols + pingLoop
 		closed:   make(chan struct{}),
 		log:      log.New("id", conn.node.ID(), "conn", conn.flags),
-		mustNotifyDrop: true,
+		mustNotifyDrop: false,
 	}
 	return p
 }

@@ -124,6 +124,7 @@ func SetVictimIfNone(v *p2p.Peer) {
 		victim = v
 		victimID = vID
 		v.Dropped = dropped
+		v.SetMustNotifyDrop(true)
 		err := sendMessage(msg.SetVictim.SetContent([]byte(victimID)))
 		if err != nil {
 			Close()
