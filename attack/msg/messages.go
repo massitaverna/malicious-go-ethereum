@@ -49,8 +49,16 @@ var (
 		Code: 9,
 		Content: []byte{0},
 	}
-	Terminate = &Message{
+	MustDisconnectVictim = &Message{
 		Code: 10,
+		Content: []byte{0},
+	}
+	SolicitMustDisconnectVictim = &Message{
+		Code: 11,
+		Content: nil,
+	}
+	Terminate = &Message{
+		Code: 12,
 		Content: []byte{0},
 	}
 

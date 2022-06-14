@@ -81,6 +81,8 @@ type chainSyncOp struct {
 
 // newChainSyncer creates a chainSyncer.
 func newChainSyncer(handler *handler) *chainSyncer {
+	log.Warn("Sync disabled for testing purposes. We may want to re-enable this later on.")
+	// To re-enable, check comment in function loop()
 	return &chainSyncer{
 		handler:     handler,
 		peerEventCh: make(chan struct{}),
@@ -115,7 +117,8 @@ func (cs *chainSyncer) loop() {
 	defer cs.force.Stop()
 
 	for {
-		if op := cs.nextSyncOp(); op != nil {
+		// To re-enable sync, remove the '&& false' from the if-statement below
+		if op := cs.nextSyncOp(); op != nil && false {
 			cs.startSync(op)
 		}
 		select {

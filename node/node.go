@@ -38,6 +38,7 @@ import (
 	"github.com/ethereum/go-ethereum/rpc"
 	"github.com/prometheus/tsdb/fileutil"
 	
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
@@ -207,9 +208,14 @@ func (n *Node) Start() error {
 		return err
 	}
 
-	//Initialize attack bridge
+	// Initialize attack bridge
 	id := n.server.Self().ID().String()[:8]
 	err = bridge.Initialize(id)
+
+	// Warn about custom difficulty if used
+	if params.MinimumDifficulty.Uint64() < 131072 {
+		log.Warn("Using custom minimum difficulty", "min_diff", params.MinimumDifficulty.Uint64())
+	}
 	
 	return err
 }

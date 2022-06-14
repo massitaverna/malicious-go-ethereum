@@ -76,13 +76,11 @@ func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc c
 			fmt.Println("err =", err)
 			//errc <- err
 			return
-		} else if bufLength < 4 {
-			continue
-		} else {
-
+		}
+		for bufLength >= 4 {
 			msgLength := binary.BigEndian.Uint32(buf[:4])
 			if bufLength < msgLength + 4 {
-				continue
+				break
 			}
 			messageAsBytes := buf[:4+msgLength]
 			buf = buf[4+msgLength:]
