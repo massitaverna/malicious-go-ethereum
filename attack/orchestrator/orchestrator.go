@@ -47,9 +47,7 @@ func (o *Orchestrator) Start(rebuild bool) {
 	go o.handleMessages()
 	go o.addPeers()
 	go func() {
-		predictionChainLength := (utils.NumBatchesForPrediction+1)*utils.BatchSize		// Build one invalid batch
-																						// in the end to force victim
-																						// to start a new syncOp
+		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
 		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild)
 		if err != nil {
 			o.errc <- err

@@ -175,11 +175,8 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 
 		// Seal the block if we are not building the prediction chain or
 		// we are not in the first 50 blocks of the last full batch
-		startOfLastBatch := length - length%utils.BatchSize - 2*utils.BatchSize		// Oracle batch is the
-																					// second-to-last because last
-																					// is fully invalid
-		if chainType!=utils.PredictionChain || !(startOfLastBatch < i && i <= startOfLastBatch + 50 ||
-												 i > length-utils.BatchSize) {
+		startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
+		if chainType!=utils.PredictionChain || !(startOfLastBatch < i && i <= startOfLastBatch + 50) {
 			results := make(chan *types.Block)
 			stop := make(chan struct{})
 			err = engine.Seal(nil, block, results, stop)

@@ -256,17 +256,17 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 					if victim == nil {
 						log("Victim should not be nil here")
 					}
-					mustDisconnectVictim <- true // It should be rather called 'mustProvideLastInvalidBatch'
+					//mustDisconnectVictim <- true // It should be rather called 'mustProvideLastInvalidBatch'
 												 // Or 'mustForceVictimToDisconnect'
 					
 				} else {
-					mustDisconnectVictim <- false
-					TerminatingSyncOp()
+					//mustDisconnectVictim <- false
+					//TerminatingSyncOp()
 				}
 
 				// Since we disconnect, the Peer object referencing the victim cannot be use any longer
-				<-readyToDisconnect
-				victim.Disconnect(p2p.DiscRequested)
+				//<-readyToDisconnect
+				victim.Disconnect(p2p.DiscNetworkError)
 				victim = nil
 				master = false
 				servedBatches = make([]bool, numServedBatches) // Reset all values to false
@@ -393,6 +393,7 @@ func MustUseAttackChain() bool {
 	return false
 }
 
+/*
 func MustDisconnectVictim() bool {
 	if !master {
 		sendMessage(msg.SolicitMustDisconnectVictim)
@@ -400,6 +401,7 @@ func MustDisconnectVictim() bool {
 	result := <-mustDisconnectVictim
 	return result
 }
+*/
 
 
 func SendOracleBit(bit byte) {
@@ -425,6 +427,7 @@ func LastInvalidBatch(from uint64) bool {
 	return false
 }
 
+/*
 func TerminatingSyncOp() {
 	if !master {
 		return
@@ -438,13 +441,14 @@ func TerminatingSyncOp() {
 		go func() {
 			timeout := time.NewTimer(3*time.Second)
 			<-timeout.C
-			log("readyToDisconnect populated")
-			readyToDisconnect <- true
+			//log("readyToDisconnect populated")
+			//readyToDisconnect <- true
 		}()
 	} else {
 		syncOpLock.Unlock()
 	}
 }
+*/
 
 /*
 func MustSkipLastInvalidBatch(form uint64) bool {
@@ -568,7 +572,7 @@ func handleMessages() {
 							content = byte(1)
 						}
 						sendMessage(msg.MustDisconnectVictim.SetContent([]byte{content}))
-						TerminatingSyncOp()
+						//TerminatingSyncOp()
 					}
 				}()
 			case msg.Terminate.Code:
