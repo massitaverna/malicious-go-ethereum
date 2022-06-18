@@ -3,7 +3,7 @@ package bridge
 import "os"
 import "net"
 import "encoding/binary"
-import "github.com/otiai10/copy"
+import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/core/rawdb"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
@@ -28,9 +28,9 @@ func getChainDatabase(chainType utils.ChainType) (ethdb.Database, error) {
 	pathSeparator := string(os.PathSeparator)
 	srcPath := home + pathSeparator + ".buildchain" + pathSeparator + chainType.GetDir()
 	dstPath := "datadir" + pathSeparator +  "mgeth" + pathSeparator + chainType.GetDir()
-	err = copy.Copy(srcPath, dstPath, copy.Options{
-		OnDirExists: func (string, string) copy.DirExistsAction {
-			return copy.Replace
+	err = dircopy.Copy(srcPath, dstPath, dircopy.Options{
+		OnDirExists: func (string, string) dircopy.DirExistsAction {
+			return dircopy.Replace
 		},
 	})
 	if err != nil {
@@ -137,7 +137,10 @@ func readLoop(conn net.Conn, incoming chan []byte, quitCh chan struct{}) {
 				break
 			}
 			msg := buf[:4+msgLength]
-			buf = buf[4+msgLength:]
+			//buf = buf[4+msgLength:]
+			temp := make([]byte, 1024)
+			copy(temp, buf[4+msgLength:])
+			buf = temp
 			bufLength -= 4 + msgLength
 			incoming <- msg
 		}

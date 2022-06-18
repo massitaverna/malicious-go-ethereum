@@ -75,7 +75,7 @@ func (m *Message) SetContent(c []byte) *Message {
 
 func (m *Message) Encode() []byte {
 	result := make([]byte, 4)
-	length := uint32(len(m.Content) + 1)				// m.code takes 1 byte
+	length := uint32(len(m.Content) + 1)				// m.Code takes 1 byte
 	binary.BigEndian.PutUint32(result, length)
 	result = append(result, m.Code)
 	result = append(result, m.Content...)
