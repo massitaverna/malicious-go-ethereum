@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/node"
+	"github.com/ethereum/go-ethereum/attack/bridge"
 
 	// Force-load the tracer engines to trigger registration
 	_ "github.com/ethereum/go-ethereum/eth/tracers/js"
@@ -160,6 +161,7 @@ var (
 		utils.GpoIgnoreGasPriceFlag,
 		utils.MinerNotifyFullFlag,
 		configFileFlag,
+		utils.OrchPortFlag,
 	}
 
 	rpcFlags = []cli.Flag{
@@ -319,6 +321,11 @@ func prepare(ctx *cli.Context) {
 
 	// Start system runtime metrics collection
 	go metrics.CollectProcessMetrics(3 * time.Second)
+
+	if !ctx.GlobalIsSet(utils.OrchPortFlag.Name) {
+		ctx.GlobalSet(utils.OrchPortFlag.Name, "45678")
+	}
+	bridge.SetOrchPort(ctx.GlobalString(utils.OrchPortFlag.Name))
 }
 
 // geth is the main entry point into the system if no special subcommand is ran.

@@ -147,10 +147,6 @@ func readLoop(conn net.Conn, incoming chan []byte, quitCh chan struct{}) {
 	}
 }
 
-func sendLoop(conn net.Conn, outgoing chan []byte, quitCh chan struct{}) {
-	
-}
-
 func fatal(err error, a ...interface{}) {
 	log(a...)
 	log("err =", err)

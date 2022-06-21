@@ -1,7 +1,7 @@
 package orchestrator
 
 import "fmt"
-import "time"
+//import "time"
 import "sync"
 import "net"
 import "errors"
@@ -59,8 +59,6 @@ func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc c
 	buf := make([]byte, 1024)
 
 	for {
-		timestamp := time.Now().Format("[01-02|15:04:05.000]")
-		fmt.Println(timestamp + " FOR", p.id)
 		select {
 		case <-quitCh:
 			p.conn.Close()
@@ -71,16 +69,8 @@ func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc c
 		default:
 		}
 
-		fmt.Println("Listening ", p.id)
 		n, err := p.conn.Read(buf[bufLength:])
-		for n==0 {
-			n, err = p.conn.Read(buf[bufLength:])
-		}
-		fmt.Println("Listened", n, " bytes", p.id)
 		bufLength += uint32(n)
-		fmt.Println("Buffer: ", buf[:bufLength], p.id)
-		fmt.Println("bufLength: ", bufLength, p.id)
-		fmt.Println("Buffer (first 20 bytes): ", buf[:20], )
 
 		if err != nil {
 			fmt.Println("Error receiving message")
@@ -90,12 +80,10 @@ func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc c
 		}
 		for bufLength >= 4 {
 			msgLength := binary.BigEndian.Uint32(buf[:4])
-			fmt.Println("msgLength:", msgLength, p.id)
 			if bufLength < msgLength + 4 {
 				break
 			}
 			messageAsBytes := buf[:4+msgLength]
-			//buf = buf[4+msgLength:]
 			temp := make([]byte, 1024)
 			copy(temp, buf[4+msgLength:])
 			buf = temp

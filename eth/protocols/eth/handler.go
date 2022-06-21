@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+	"errors"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -150,10 +151,39 @@ func nodeInfo(chain *core.BlockChain, network uint64) *NodeInfo {
 // the protocol handshake. This method will keep processing messages until the
 // connection is torn down.
 func Handle(backend Backend, peer *Peer) error {
+	errc := make(chan error)
+	stop := make(chan struct{})
+	defer close(stop)
+
 	for {
-		if err := handleMessage(backend, peer); err != nil {
-			peer.Log().Debug("Message handling failed in `eth`", "err", err)
-			return err
+		go func() {
+			select {
+				case <-stop:
+					close(errc)
+				case errc <- handleMessage(backend, peer):
+			}
+		}()
+		timeout := time.NewTimer(1*time.Second)
+
+		L:
+		for {
+			select {
+			case <-timeout.C:
+				if peer.Peer.IsClosed() {
+					return errors.New("p2p peer is closed")
+				} else {
+					timeout.Reset(1*time.Second)
+					continue
+				}
+			case err := <-errc:
+				if err != nil {
+					peer.Log().Debug("Message handling failed in `eth`", "err", err)
+					return err
+				} else {
+					timeout.Stop()
+					break L
+				}
+			}
 		}
 	}
 }

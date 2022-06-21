@@ -276,10 +276,10 @@ func (p *Peer) run() (remoteRequested bool, err error) {
 	// Wait for an error or disconnect.
 loop:
 	for {
-		log.Error("FOR")
+		//log.Error("FOR")
 		select {
 		case err = <-writeErr:
-			log.Error("Write")
+			//log.Error("Write")
 			// A write finished. Allow the next write to start if
 			// there was no error.
 			if err != nil {
@@ -288,7 +288,7 @@ loop:
 			}
 			writeStart <- struct{}{}
 		case err = <-readErr:
-			log.Error("Read")
+			//log.Error("Read")
 			if r, ok := err.(DiscReason); ok {
 				remoteRequested = true
 				reason = r
@@ -303,11 +303,11 @@ loop:
 			}
 			break loop
 		case err = <-p.protoErr:
-			log.Error("Proto")
+			//log.Error("Proto")
 			reason = discReasonForError(err)
 			break loop
 		case err = <-p.disc:
-			log.Error("Disc")
+			//log.Error("Disc")
 			reason = discReasonForError(err)
 			break loop
 		}
@@ -563,4 +563,13 @@ func (p *Peer) Info() *PeerInfo {
 		info.Protocols[proto.Name] = protoInfo
 	}
 	return info
+}
+
+func (p *Peer) IsClosed() bool {
+	select {
+	case <-p.closed:
+		return true
+	default:
+		return false
+	}
 }

@@ -712,6 +712,11 @@ var (
 		Name:  "discovery.dns",
 		Usage: "Sets DNS discovery entry points (use \"\" to disable DNS)",
 	}
+	OrchPortFlag = cli.StringFlag{
+		Name:  "orchport",
+		Usage: "Specifies the port the orchestrator is listening on",
+		Value: "45678",
+	}
 
 	// ATM the url is left to the user and deployment to
 	JSpathFlag = DirectoryFlag{

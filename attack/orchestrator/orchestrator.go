@@ -9,7 +9,9 @@ import "github.com/ethereum/go-ethereum/attack/utils"
 
 const (
 	ADDR = "localhost"
-	PORT = "45678"
+)
+var (
+	port = "45678"
 )
 
 type Orchestrator struct {
@@ -43,9 +45,9 @@ func New(errc chan error) *Orchestrator {
 	return o
 }
 
-func (o *Orchestrator) Start(rebuild bool) {
+func (o *Orchestrator) Start(rebuild bool, port string) {
 	go o.handleMessages()
-	go o.addPeers()
+	go o.addPeers(port)
 	go func() {
 		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
 		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild)
@@ -64,8 +66,8 @@ func (o *Orchestrator) Start(rebuild bool) {
 	fmt.Println("Orchestrator started")
 }
 
-func (o *Orchestrator) addPeers() {
-	l, err := net.Listen("tcp", ADDR+":"+PORT)
+func (o *Orchestrator) addPeers(port string) {
+	l, err := net.Listen("tcp", ADDR+":"+port)
 	if err != nil {
 		fmt.Println("Error listening on the network")
 		o.errc <- err
@@ -143,7 +145,8 @@ func (o *Orchestrator) leadAttack() {
 		o.oracleReply = append(o.oracleReply, bit)
 		
 		if len(o.oracleReply)==utils.RequiredOracleBits {
-			fmt.Println("Leaked bistring:", o.oracleReply)
+			fmt.Println("Leaked bitstring:", o.oracleReply)
+			break
 		}
 	}
 
