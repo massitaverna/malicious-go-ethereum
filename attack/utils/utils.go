@@ -25,11 +25,13 @@ const (
 									// We need m+1 to be even if the malicious peers are 2
 
 	RequiredOracleBits = 31			// Corresponds to parameter n in Section 13 of the Write-Up
+	SeedSize = 4					// The seed is always 4 bytes long
 )
 
 var (
 	BridgeClosedErr = errors.New("bridge closed")
 	PartialSendErr  = errors.New("message sent only partially")
+	PartialRecvErr  = errors.New("message received only partially")
 	ParameterErr    = errors.New("parameter(s) is invalid")
 
 	HigherTd = big.NewInt(100_000_000_000_000_000)

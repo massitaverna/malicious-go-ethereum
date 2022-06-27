@@ -4,6 +4,7 @@ import "fmt"
 import "net"
 import "time"
 import "sync"
+import "bytes"
 import "encoding/binary"
 import "github.com/ethereum/go-ethereum/attack/buildchain"
 import "github.com/ethereum/go-ethereum/attack/msg"
@@ -11,9 +12,11 @@ import "github.com/ethereum/go-ethereum/attack/utils"
 
 const (
 	ADDR = "localhost"
+	SEED_ADDR = "localhost"
 )
 var (
 	port = "45678"
+	seed_port = "65432"
 )
 
 type Orchestrator struct {
@@ -180,6 +183,67 @@ func (o *Orchestrator) leadAttack() {
 	}
 
 	o.errc <- nil
+}
+
+func recoverSeed(bitstring []byte) (int32, error) {
+	leadingZeroes := 8 - len(bitstring)%8
+	padding := make([]byte, leadingZeroes)
+	bitstring = append(padding, bitstring...)
+
+	keyLength := len(bitstring) / 8
+	var key []byte
+	for i:=0; i < keyLength; i++ {
+		sum := byte(0)
+		for j:=0; j < 8; j++ {
+			idx := 8*i + j
+			sum *= 2
+			if bitstring[idx] == byte(1) {
+				sum += 1
+			}
+		}
+		key = append(key, sum)
+	}
+
+	conn, err := net.Dial("tcp", SEED_ADDR+":"+seed_port)
+	if err != nil {
+		fmt.Println("Could not connect to seed recovery server")
+		return -1, err
+	}
+	defer conn.Close()
+
+	n, err := conn.Write(key)
+	if err != nil {
+		fmt.Println("Could not send key to seed recovery server")
+		return -1, err
+	}
+	if n != keyLength {
+		fmt.Println("Could not send full key to seed recovery server")
+		return -1, utils.PartialSendErr
+	}
+
+	buf := make([]byte, utils.SeedSize)
+	n, err = conn.Read(buf)
+	if err != nil {
+		fmt.Println("Could not receive seed from seed recovery server")
+		return -1, err
+	}
+	if n != utils.SeedSize {
+		fmt.Println("Could not receive full seed from seed recovery server")
+		return -1, utils.PartialRecvErr
+	}
+
+	bufReader := bytes.NewReader(buf)
+	var seed int32
+	err = binary.Read(bufReader, binary.BigEndian, &seed)
+	if err != nil {
+		fmt.Println("Could not decode seed from bytes to int32")
+		return -1, err
+	}
+	if seed < 0 {
+		fmt.Println("Received seed is negative")
+		return seed, utils.ParameterErr
+	}
+	return seed, nil
 }
 
 func (o *Orchestrator) handleMessages() {
