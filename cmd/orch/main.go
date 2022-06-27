@@ -13,7 +13,7 @@ func main() {
 	rebuild := flag.Bool("rebuild", false, "Rebuild underlying chain(s) and overwrite them in buildchain tool's directory")
 	port    := flag.String("port", "45678", "Specify port to listen on")
 	flag.Parse()
-	errc := make(chan error)				// Channel to signal the first error or success
+	errc := make(chan error, 1)				// Channel to signal the first error or success
 
 	orch := orchestrator.New(errc)
 	orch.Start(*rebuild, *port)

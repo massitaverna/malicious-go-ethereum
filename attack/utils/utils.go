@@ -18,7 +18,8 @@ const (
 	StalePhase = AttackPhase(0)
 	ReadyPhase = AttackPhase(1)
 	PredictionPhase = AttackPhase(2)
-	OtherPhase = AttackPhase(3)
+	SyncPhase = AttackPhase(3)
+	OtherPhase = AttackPhase(4)
 
 	BatchSize = 192
 	NumBatchesForPrediction = 8		// Corresponds to m+1, with m parameter in Section 13 of the Write-Up

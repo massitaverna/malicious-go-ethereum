@@ -64,6 +64,10 @@ var (
 		Code: 13,
 		Content: []byte{0},
 	}
+	LastOracleBit = &Message{
+		Code: 14,
+		Content: nil,
+	}
 
 )
 
