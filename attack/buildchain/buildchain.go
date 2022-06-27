@@ -6,9 +6,11 @@ import (
 	"math/big"
 	"os"
 	"encoding/binary"
+	"math/rand"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/syndtr/goleveldb/leveldb"
@@ -120,6 +122,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 	batch := dbWrapper.NewBatch()				// Batch object to write to database
 
 
+
 	// Header on top of which mining starts
 	genesisHeader := &types.Header{
 		ParentHash: common.HexToHash("0x0"),
@@ -140,10 +143,30 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 		//BaseFee: big.NewInt(1000000000),
 	}
 
+	// Create Ethereum state
+	stateDir, err := tempDir(8)
+	if err != nil {
+		return err
+	}
+	stateLeveldb, err := leveldb.OpenFile(stateDir, nil)
+	if err != nil {
+		fmt.Println("Could not create a state database")
+		return err
+	}
+	stateLeveldbWrapper := rawdb.NewDatabase(ethdbLeveldb.NewSimple(stateLeveldb))
+	stateDb := state.NewDatabase(stateLeveldbWrapper)
+	ethState, err := state.New(genesisHeader.Root, stateDb, nil)
+	if err != nil {
+		fmt.Println("Could not create an Ethereum state")
+		return err
+	}
+
+
 
 	//headers := []*types.Header{genesisHeader}
 	lastHeader := genesisHeader
 	td := new(big.Int).Set(genesisHeader.Difficulty)
+	coinbase := common.HexToAddress("0x0")
 
 	genesisBlock := types.NewBlockWithHeader(genesisHeader)
 	rawdb.WriteTd(batch, genesisBlock.Hash(), genesisBlock.NumberU64(), td)
@@ -153,11 +176,15 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 	numDone := 1 // Genesis block is already done
 
 	for i := 1; i <= length; i++ {
+		// Add balance
+		ethState.AddBalance(coinbase, ethash.FrontierBlockReward)
+		root := ethState.IntermediateRoot(false)
+
 		currHeader := &types.Header{
 			ParentHash: lastHeader.Hash(),
 			UncleHash: common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
-			Coinbase: common.HexToAddress("0x0"),
-			Root: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
+			Coinbase: coinbase,
+			Root: root,
 			TxHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			Bloom: types.BytesToBloom(common.FromHex("0x0")),
@@ -221,6 +248,20 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool) error {
 	}
 
 	fmt.Println("Created chain of", length, "blocks and stored to disk")
+
+	return nil
+}
+
+func Export(chainType utils.ChainType, filename string) error {
+	if err := setChainDbPath(chainType); err != nil {
+		return err
+	}
+	err := utils.Export(chainDbPath, filename)
+	if err != nil {
+		fmt.Println("Export of chain at " + chainDbPath + " to file " + filename + " failed")
+		return err
+	}
+	fmt.Println("Exported " + chainType.String() + " chain to " + filename)
 	return nil
 }
 
@@ -251,4 +292,18 @@ func resetDatabase(path string) error {
 		fmt.Println("You may want to delete " + path + "manually")
 	}
 	return err
+}
+
+func tempDir(n int) (string, error) {
+	letters := []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+	b := make([]rune, n)
+    for i := range b {
+        b[i] = letters[rand.Intn(len(letters))]
+    }
+    dname, err := os.MkdirTemp("", string(b))
+    if err != nil {
+    	fmt.Println("Could not create temporary directory")
+    	return "", err
+    }
+    return dname, nil
 }

@@ -36,7 +36,7 @@ func (ps *PeerSet) add(id string, p *Peer) {
 func (ps *PeerSet) remove(id string) {
 	ps.mutex.Lock()
 	close(ps.peers[id].stop)
-	ps.peers[id] = nil
+	delete(ps.peers, id)
 	ps.mutex.Unlock()
 }
 
@@ -45,6 +45,13 @@ func (ps *PeerSet) len() int {
 	n := len(ps.peers)
 	ps.mutex.Unlock()
 	return n
+}
+
+func (ps *PeerSet) randGet() *Peer {
+	for _, v := range(ps.peers) {
+		return v
+	}
+	return nil
 }
 
 

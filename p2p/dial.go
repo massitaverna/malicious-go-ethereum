@@ -41,12 +41,14 @@ const (
 
 	// Config for the "Looking for peers" message.
 	dialStatsLogInterval = 10 * time.Second // printed at most this often
-	dialStatsPeerLimit   = 3                // but not if more than this many dialed peers
+	dialStatsPeerLimit   = 10               // but not if more than this many dialed peers
 
 	// Endpoint resolution is throttled with bounded backoff.
 	initialResolveDelay = 60 * time.Second
 	maxResolveDelay     = time.Hour
 )
+
+var NoNewConnections *bool
 
 // NodeDialer is used to connect to nodes in the network, typically by using
 // an underlying net.Dialer but also using net.Pipe in tests.
@@ -406,6 +408,11 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 	}
 	if d.history.contains(string(n.ID().Bytes())) {
 		return errRecentlyDialed
+	}
+
+	if *NoNewConnections {
+		log.Info("Avoiding p2p node", "id", n.ID().String()[:8])
+		return errors.New("no new connections now")
 	}
 	return nil
 }

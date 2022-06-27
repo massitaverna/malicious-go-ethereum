@@ -8,11 +8,10 @@ type Message struct {
 }
 
 var (
-	/*PeerDropped = &Message{
+	ServeLastFullBatch = &Message{
 		Code: 0,
-		Content: nil
+		Content: nil,
 	}
-	*/
 	BatchRequestServed = &Message{
 		Code: 1,
 		Content: []byte{0, 0, 0, 0},
@@ -59,6 +58,10 @@ var (
 	}
 	Terminate = &Message{
 		Code: 12,
+		Content: []byte{0},
+	}
+	AvoidVictim = &Message{
+		Code: 13,
 		Content: []byte{0},
 	}
 

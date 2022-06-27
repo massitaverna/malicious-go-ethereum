@@ -964,6 +964,10 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		c.node = nodeFromConn(remotePubkey, c.fd)
 	}
 	clog := srv.log.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
+	if *NoNewConnections {
+		clog.Info("Avoiding p2p node")
+		return errors.New("no new connections now")
+	}
 	err = srv.checkpoint(c, srv.checkpointPostHandshake)
 	if err != nil {
 		clog.Trace("Rejected peer", "err", err)

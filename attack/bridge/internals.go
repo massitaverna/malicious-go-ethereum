@@ -2,6 +2,7 @@ package bridge
 
 import "os"
 import "net"
+import "math/big"
 import "encoding/binary"
 import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/core/rawdb"
@@ -69,6 +70,26 @@ func latest(chainType utils.ChainType) *types.Header {
 	number := rawdb.ReadHeaderNumber(db, hash)
 	header := rawdb.ReadHeader(db, hash, *number)
 	return header
+}
+
+func genesis(chainType utils.ChainType) *types.Header {
+	db, err := getChainDatabase(chainType)
+	if err != nil {
+		fatal(err, "Could not get genesis block of", chainType, "chain")
+	}
+	hash := rawdb.ReadCanonicalHash(db, uint64(0))
+	header := rawdb.ReadHeader(db, hash, uint64(0))
+	return header
+}
+
+func getTd(chainType utils.ChainType) *big.Int {
+	db, err := getChainDatabase(chainType)
+	if err != nil {
+		fatal(err, "Could not get total difficulty of", chainType, "chain")
+	}
+	hash := rawdb.ReadHeadHeaderHash(db)
+	number := rawdb.ReadHeaderNumber(db, hash)
+	return rawdb.ReadTd(db, hash, *number)
 }
 
 /*

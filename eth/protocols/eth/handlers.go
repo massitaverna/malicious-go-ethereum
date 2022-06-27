@@ -129,9 +129,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	}
 
 	pivoting := false
-	if !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse {		// Pivoting request
-		// We must make the pivoting request fail so that the victim will immediately start a new syncOp
-		// without waiting for a timeout
+	if !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse &&
+	 bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+	 	// Pivoting request.
+		// We must delay the pivoting request so that the victim will find the master peer already
+		// disconnected when it sends out the second skeleton request. This will immediately start
+		// a new syncOp, without waiting for a timeout.
 		pivoting = true
 		bridge.WaitBeforePivoting()
 	}
@@ -242,7 +245,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			from = from + count - 1
 		}
 		headers := chain.GetHeadersFrom(from, count)
-		log.Info("Got headers for query", "amount", query.Amount, "from", query.Origin.Number, "len_headers", len(headers))
+		log.Info("Got headers for query", "amount", query.Amount, "from", query.Origin.Number, "len_headers", len(headers), "peer", peer.Peer.ID().String()[:8])
 		if !query.Reverse {
 			for i, j := 0, len(headers)-1; i < j; i, j = i+1, j-1 {
 				headers[i], headers[j] = headers[j], headers[i]
@@ -252,6 +255,9 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Introducing delay and marking batch as served
 		if query.Amount == 192 && query.Skip == 0 && query.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.DelayBeforeServingBatch()
+			if bridge.LastFullBatch(query.Origin.Number) {
+				bridge.WaitBeforeLastFullBatch()
+			}
 			bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
 		}
 

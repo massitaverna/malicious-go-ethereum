@@ -1,8 +1,12 @@
 package utils
 
+import "fmt"
+import "os"
 import "math/big"
 import "errors"
-//import "github.com/ethereum/go-ethereum/core/types"
+import "github.com/ethereum/go-ethereum/core/types"
+import "github.com/ethereum/go-ethereum/common"
+import "github.com/ethereum/go-ethereum/core/rawdb"
 
 type AttackPhase byte
 
@@ -21,7 +25,6 @@ const (
 									// We need m+1 to be even if the malicious peers are 2
 
 	RequiredOracleBits = 31			// Corresponds to parameter n in Section 13 of the Write-Up
-
 )
 
 var (
@@ -98,3 +101,36 @@ func GetHigherPivot() *types.Header {
 	}
 }
 */
+
+func Export(dbPath, filename string) error {
+	fh, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		fmt.Println("Could not open file " + filename)
+		return err
+	}
+
+	db, err := rawdb.NewLevelDBDatabase(dbPath, 0, 0, "", false)
+	if err != nil {
+		fmt.Println("Could not load database at " + dbPath)
+		return err
+	}
+
+	headHash := rawdb.ReadHeadHeaderHash(db)
+	last := *(rawdb.ReadHeaderNumber(db, headHash))
+	for nr := uint64(0); nr <= last; nr++ {
+		var block *types.Block
+		hash := rawdb.ReadCanonicalHash(db, nr)
+		if hash == (common.Hash{}) {
+			block = nil
+		} else {
+			block = rawdb.ReadBlock(db, hash, nr)
+		}
+		if block == nil {
+			return fmt.Errorf("export failed on #%d: not found", nr)
+		}
+		if err := block.EncodeRLP(fh); err != nil {
+			return err
+		}
+	}
+	return nil
+}

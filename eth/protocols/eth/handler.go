@@ -170,6 +170,7 @@ func Handle(backend Backend, peer *Peer) error {
 			select {
 			case <-timeout.C:
 				if peer.Peer.IsClosed() {
+					peer.Log().Debug("p2p peer is closed")
 					return errors.New("p2p peer is closed")
 				} else {
 					timeout.Reset(1*time.Second)

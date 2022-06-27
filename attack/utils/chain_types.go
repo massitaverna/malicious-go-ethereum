@@ -28,3 +28,18 @@ func (ct ChainType) String() string {
 
 	return s
 }
+
+func StringToChainType(s string) (ChainType, error) {
+	switch s {
+	case "prediction":
+		return PredictionChain, nil
+	case "other":
+		return OtherChain, nil
+	default:
+		return InvalidChainType, ParameterErr
+	}
+}
+
+func AllChainsNames() string {
+	return "'prediction', 'other'"
+}
