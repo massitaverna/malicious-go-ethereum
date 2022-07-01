@@ -19,6 +19,8 @@ func main() {
 	typeName  := flag.String("type", "prediction", "Type of chain to build (allowed: " + utils.AllChainsNames() + ")")
 	export    := flag.String("export", "not set", "If set, export the chain to the specified file in RLP-encoded form. Useful for imports with 'geth import'")
 	debug     := flag.Bool("debug", false, "Enable debug logs")
+	numAccounts := flag.Int("accounts", 0, "Number of accounts to generate (for true chain)")
+
 	flag.Parse()
 	chaintype, err := utils.StringToChainType(*typeName)
 	if err != nil {
@@ -30,8 +32,14 @@ func main() {
 		fmt.Println("Specify chain type with flag --type")
 		return
 	}
+
+	if isFlagPassed("accounts") && chaintype != utils.TrueChain {
+		fmt.Println("Flag --accounts can be specified only for --type=true")
+		return
+	}
+
 	if isFlagPassed("n") {
-		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *debug)
+		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *numAccounts, *debug)
 		if err != nil {
 			fmt.Println("Could not build the chain")
 			fmt.Println("err =", err)

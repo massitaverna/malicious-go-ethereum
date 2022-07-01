@@ -22,6 +22,7 @@ const (
 )
 
 var (
+	numAccounts = uint64(0)
 	gasPool *core.GasPool
 	nonce = uint64(0)
 	bigZero = big.NewInt(0)

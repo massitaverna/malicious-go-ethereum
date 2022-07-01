@@ -64,7 +64,7 @@ func setEthashDatasetDir() error {
 	return nil
 }
 
-func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug bool) error {
+func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts int, debug bool) error {
 	// Create/open database
 	if err := setChainDbPath(chainType); err != nil {
 		return err
@@ -164,6 +164,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 		}
 	}
 	fmt.Println("Using coinbase", coinbase)
+	numAccounts = numAccts
 
 	// Header on top of which mining starts
 	genesisHeader := &types.Header{
