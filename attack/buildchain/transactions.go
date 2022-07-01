@@ -72,7 +72,7 @@ func transfer(from, to, coinbase common.Address, header *types.Header, bc *core.
 
 	receipt, err := core.ApplyTransaction(chainConfig, bc, &coinbase, gasPool, statedb, header, tx, &header.GasUsed, vmcfg)
 	if err != nil {
-		fmt.Println("Could not apply transaction", "headerNumber=", header.Number, "nonce=", nonce, "to=", to)
+		fmt.Println("Could not apply transaction\t\t", "headerNumber=", header.Number, "nonce=", nonce, "to=", to)
 		return nil, nil, err
 	}
 	nonce++
@@ -93,7 +93,7 @@ func autoTransactions(howMany int, header *types.Header, bc *core.BlockChain, st
 		to := common.BigToAddress(addrTo)
 		tx, rcpt, err := transfer(coinbase, to, coinbase, header, bc, statedb, chainConfig)
 		if err != nil {
-			fmt.Println("Automatic transactions failed")
+			fmt.Println("Automatic transactions failed\t\tnum=", i)
 			return nil, nil, err
 		}
 		txs = append(txs, tx)
