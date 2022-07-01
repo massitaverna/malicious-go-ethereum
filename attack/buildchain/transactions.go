@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	numAccounts = uint64(1e4)
+	numAccounts = uint64(1e7)
 	ranges = uint64(16)
 	gasForSimpleTx = uint64(21000)
 )
@@ -27,6 +27,7 @@ var (
 	bigZero = big.NewInt(0)
 	oneWei = big.NewInt(1)
 	//maxFeePerGas = big.NewInt(100)
+	onlyRewardsBlocks = 1
 )
 
 func accountsPerRange() uint64 {

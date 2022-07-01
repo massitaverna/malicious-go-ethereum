@@ -176,7 +176,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 		Bloom: types.BytesToBloom(common.FromHex("0x0")),
 		Difficulty: params.MinimumDifficulty,
 		Number: big.NewInt(0),
-		GasLimit: uint64(3141592),
+		GasLimit: uint64(0x4c4b40),	//5,000,000
 		GasUsed: uint64(0),
 		Time: uint64(0),
 		Extra: params.DAOForkBlockExtra,
@@ -246,10 +246,9 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 	}
 
 	numDone := 1 // Genesis block is already done
+	numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
 
 	for i := 1; i <= length; i++ {
-		numTxs := int(numAccounts) / (length-1)
-
 		currHeader := &types.Header{
 			ParentHash: lastHeader.Hash(),
 			UncleHash: common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
@@ -260,7 +259,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 			Bloom: types.BytesToBloom(common.FromHex("0x0")),
 			Difficulty: ethash.CalcDifficulty(chainConfig, lastHeader.Time + uint64(13), lastHeader),
 			Number: big.NewInt(0).Add(lastHeader.Number, big.NewInt(1)),
-			GasLimit: uint64(3141592),
+			GasLimit: genesisHeader.GasLimit,
 			GasUsed: uint64(0),
 			Time: lastHeader.Time + uint64(13),
 			Extra: params.DAOForkBlockExtra,
@@ -269,8 +268,9 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 		td.Add(td, currHeader.Difficulty)
 
 		var block *types.Block
-		// Use the first block to just generate block rewards, while the following ones to create accounts as well.
-		if i == 1 {
+		// Use the first two blocks to just generate block rewards,
+		// while the following ones to create accounts as well.
+		if i <= onlyRewardsBlocks {
 			block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
 		} else {
 			// Transfer some wei to many accounts
