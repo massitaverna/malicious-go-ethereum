@@ -16,7 +16,6 @@ import (
 )
 
 const (
-	numAccounts = uint64(1e7)
 	ranges = uint64(16)
 	gasForSimpleTx = uint64(21000)
 )

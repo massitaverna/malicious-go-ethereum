@@ -164,7 +164,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		}
 	}
 	fmt.Println("Using coinbase", coinbase)
-	numAccounts = numAccts
+	numAccounts = uint64(numAccts)
 
 	// Header on top of which mining starts
 	genesisHeader := &types.Header{
