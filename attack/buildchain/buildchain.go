@@ -145,7 +145,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		CachesOnDisk:     3,
 		CachesLockMmap:   false,
 		DatasetsInMem:    1,
-		DatasetsOnDisk:   4,		// Number of DAGs (one per epoch) to store on disk
+		DatasetsOnDisk:   20,		// Number of DAGs (one per epoch) to store on disk
 		DatasetsLockMmap: false,
 	}
 
