@@ -270,7 +270,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, debug boo
 		var block *types.Block
 		// Use the first two blocks to just generate block rewards,
 		// while the following ones to create accounts as well.
-		if i <= onlyRewardsBlocks {
+		if i <= onlyRewardsBlocks || chainType != utils.TrueChain {
 			block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
 		} else {
 			// Transfer some wei to many accounts
