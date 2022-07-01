@@ -12,11 +12,12 @@ func main() {
 
 	rebuild := flag.Bool("rebuild", false, "Rebuild underlying chain(s) and overwrite them in buildchain tool's directory")
 	port    := flag.String("port", "45678", "Specify port to listen on")
+	predictionOnly := flag.Bool("prediction-only", false, "Quit after leaking bitstring")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
 	orch := orchestrator.New(errc)
-	orch.Start(*rebuild, *port)
+	orch.Start(*rebuild, *port, *predictionOnly)
 	//orch.Wait()							// Calling Wait() would cause a deadlock, because when the attack
 											// finishes, the orchestrator wants to send on errc and then quit,
 											// but here the main is not receiving on errc until the orch quits.

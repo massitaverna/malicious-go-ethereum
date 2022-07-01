@@ -5,15 +5,23 @@ type ChainType byte
 const (
 	InvalidChainType = ChainType(0)
 	PredictionChain = ChainType(1)
-	OtherChain = ChainType(2)
+	TrueChain = ChainType(2)
+	OtherChain = ChainType(3)
 )
 
 func (ct ChainType) GetDir() string {
-	if ct == PredictionChain {
-		return "prediction_chain_db"
-	} else {
-		return "other_chain_db"
+	var dir string
+
+	switch(ct) {
+	case PredictionChain:
+		dir = "prediction_chain_db"
+	case TrueChain:
+		dir = "true_chain_db"
+	default:
+		dir = "other_chain_db"
 	}
+	
+	return dir
 }
 
 func (ct ChainType) String() string {
@@ -22,6 +30,8 @@ func (ct ChainType) String() string {
 	switch (ct) {
 	case PredictionChain:
 		s = "prediction"
+	case TrueChain:
+		s = "true"
 	default:
 		s = "other"
 	}
@@ -33,6 +43,8 @@ func StringToChainType(s string) (ChainType, error) {
 	switch s {
 	case "prediction":
 		return PredictionChain, nil
+	case "true":
+		return TrueChain, nil
 	case "other":
 		return OtherChain, nil
 	default:
@@ -41,5 +53,5 @@ func StringToChainType(s string) (ChainType, error) {
 }
 
 func AllChainsNames() string {
-	return "'prediction', 'other'"
+	return "'prediction', 'true', 'other'"
 }

@@ -119,7 +119,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 
 		//head, pivot := bridge.GetHigherHeadAndPivot()
 
-		if bridge.MustUseAttackChain() {
+		if chain != attackChain && bridge.MustUseAttackChain() {
 			chain = attackChain 			// As we changed the bridge state (setting a victim), re-check whether
 											// we need to use attack chain
 			log.Info("Switched to attack chain because victim is now set")
@@ -129,12 +129,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	}
 
 	pivoting := false
-	if !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse &&
+	if bridge.DoingPrediction() && !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse &&
 	 bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 	 	// Pivoting request.
-		// We must delay the pivoting request so that the victim will find the master peer already
-		// disconnected when it sends out the second skeleton request. This will immediately start
-		// a new syncOp, without waiting for a timeout.
+		// When doing prediction, we must delay the pivoting request so that the victim will find the
+		// master peer already disconnected when it sends out the second skeleton request. This will
+		// immediately start a new syncOp, without waiting for a timeout.
 		pivoting = true
 		bridge.WaitBeforePivoting()
 	}
@@ -253,7 +253,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		}
 
 		// Introducing delay and marking batch as served
-		if query.Amount == 192 && query.Skip == 0 && query.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		if query.Amount == 192 && query.Skip == 0 && query.Reverse == false &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.DoingPredictionOrReady() {
 			bridge.DelayBeforeServingBatch()
 			if bridge.LastFullBatch(query.Origin.Number) {
 				bridge.WaitBeforeLastFullBatch()

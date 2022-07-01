@@ -18,6 +18,7 @@ func main() {
 	overwrite := flag.Bool("overwrite", false, "Build a new chain even if an equivalent one already exists, and overwrite it")
 	typeName  := flag.String("type", "prediction", "Type of chain to build (allowed: " + utils.AllChainsNames() + ")")
 	export    := flag.String("export", "not set", "If set, export the chain to the specified file in RLP-encoded form. Useful for imports with 'geth import'")
+	debug     := flag.Bool("debug", false, "Enable debug logs")
 	flag.Parse()
 	chaintype, err := utils.StringToChainType(*typeName)
 	if err != nil {
@@ -30,7 +31,7 @@ func main() {
 		return
 	}
 	if isFlagPassed("n") {
-		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite)
+		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *debug)
 		if err != nil {
 			fmt.Println("Could not build the chain")
 			fmt.Println("err =", err)

@@ -36,7 +36,7 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	lru "github.com/hashicorp/golang-lru"
 
-	//"github.com/ethereum/go-ethereum/attack/bridge"
+	"github.com/ethereum/go-ethereum/attack/bridge"
 	//"github.com/ethereum/go-ethereum/attack/utils"
 )
 
@@ -111,6 +111,7 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 	}
 	hc.currentHeaderHash = hc.CurrentHeader().Hash()
 	headHeaderGauge.Update(hc.CurrentHeader().Number.Int64())
+	bridge.SetTrueChain(chainDb)
 	return hc, nil
 }
 

@@ -7,6 +7,7 @@ import "errors"
 import "github.com/ethereum/go-ethereum/core/types"
 import "github.com/ethereum/go-ethereum/common"
 import "github.com/ethereum/go-ethereum/core/rawdb"
+import "github.com/ethereum/go-ethereum/params"
 
 type AttackPhase byte
 
@@ -25,7 +26,8 @@ const (
 	NumBatchesForPrediction = 8		// Corresponds to m+1, with m parameter in Section 13 of the Write-Up
 									// We need m+1 to be even if the malicious peers are 2
 
-	RequiredOracleBits = 31			// Corresponds to parameter n in Section 13 of the Write-Up
+	RequiredOracleBits = 14			// Corresponds to parameter n in Section 13 of the Write-Up.
+									// Now set to 14 for testing purposes, otherwise >=31
 	SeedSize = 4					// The seed is always 4 bytes long
 )
 
@@ -34,14 +36,28 @@ var (
 	PartialSendErr  = errors.New("message sent only partially")
 	PartialRecvErr  = errors.New("message received only partially")
 	ParameterErr    = errors.New("parameter(s) is invalid")
+	StateError      = errors.New("reached an invalid state")
 
-	HigherTd = big.NewInt(100_000_000_000_000_000)
+	D0 = params.MinimumDifficulty							// In our simulation, the difficulty at the original head
+															// when the attack starts is the same as the genesis
+															// difficulty, which is the same as the minimum difficulty.
+															// However, to run this attack in the real Ethereum network,
+															// D0 should be set to the current difficulty (ca 14*10^15)
+	
+	HigherTd = new(big.Int).Mul(big.NewInt(1_000_000_000_000), big.NewInt(1_000_000_000_000)) // 10^24
+	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(41))		// The value 41 is computed as 90% of the number of
+																	// new blocks mined during the headers download.
+																	// For a real attack, this would be ca. 500 (2hrs).
+
+	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
 )
 
 func (phase AttackPhase) ToChainType() ChainType {
 	switch phase {
 	case PredictionPhase:
 		return PredictionChain
+	case SyncPhase:
+		return TrueChain
 	case OtherPhase:
 		return OtherChain
 	default:
@@ -57,6 +73,8 @@ func (phase AttackPhase) String() string {
 		return "ready"
 	case PredictionPhase:
 		return "prediction"
+	case SyncPhase:
+		return "sync"
 	default:
 		return "other"
 	}

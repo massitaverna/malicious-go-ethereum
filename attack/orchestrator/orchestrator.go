@@ -34,6 +34,7 @@ type Orchestrator struct {
 	mu sync.Mutex
 	syncOps int
 	syncCh chan struct{}
+	predictionOnly bool
 
 }
 
@@ -53,17 +54,18 @@ func New(errc chan error) *Orchestrator {
 		firstMasterSet: false,
 		syncOps: 0,
 		syncCh: make(chan struct{}),
+		predictionOnly: false,
 	}
 
 	return o
 }
 
-func (o *Orchestrator) Start(rebuild bool, port string) {
+func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly bool) {
 	go o.handleMessages()
 	go o.addPeers(port)
 	go func() {
 		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
-		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild)
+		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild, false)
 		if err != nil {
 			o.errc <- err
 			o.close()
@@ -71,6 +73,8 @@ func (o *Orchestrator) Start(rebuild bool, port string) {
 		}
 		o.chainBuilt = true
 	}()
+
+	o.predictionOnly = predictionOnly
 
 	if o.localMaliciousPeers {
 		//TODO: Start two peers with 'mgeth'
@@ -210,7 +214,13 @@ func (o *Orchestrator) leadAttack() {
 		}
 	}
 
+	if o.predictionOnly {
+		o.errc <- nil
+		return
+	}
+
 	o.attackPhase = utils.SyncPhase
+	fmt.Println("Started", o.attackPhase, "phase")
 	// From here on, we develop the second phase of the attack
 
 
@@ -315,7 +325,7 @@ func (o *Orchestrator) handleMessages() {
 					return
 				}
 				go func() {
-					if o.syncOps == utils.RequiredOracleBits - 1 {
+					if o.syncOps == utils.RequiredOracleBits {
 						<-o.syncCh
 					}
 					err := o.sendAllExcept(message, sender)
@@ -327,6 +337,7 @@ func (o *Orchestrator) handleMessages() {
 				}()
 			case msg.SetAttackPhase.Code:
 				o.attackPhase = utils.AttackPhase(message.Content[0])
+				fmt.Println("Started", o.attackPhase, "phase")
 				go func() {
 					err := o.sendAllExcept(message, sender)
 					if err != nil {

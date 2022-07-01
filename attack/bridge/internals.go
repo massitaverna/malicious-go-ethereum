@@ -2,6 +2,7 @@ package bridge
 
 import "os"
 import "net"
+import "sync"
 import "math/big"
 import "encoding/binary"
 import dircopy "github.com/otiai10/copy"
@@ -12,13 +13,22 @@ import "github.com/ethereum/go-ethereum/attack/utils"
 
 
 var databases map[utils.ChainType]ethdb.Database
+var dbLock sync.Mutex
 
 func getChainDatabase(chainType utils.ChainType) (ethdb.Database, error) {
+	dbLock.Lock()
+	defer dbLock.Unlock()
+
 	if databases == nil {
 		databases = make(map[utils.ChainType]ethdb.Database)
 	}
 	if databases[chainType] != nil {
 		return databases[chainType], nil
+	}
+
+	if chainType == utils.TrueChain {
+		log("True chain database requested before initializing it")
+		return nil, utils.StateError
 	}
 
 	home, err := os.UserHomeDir()
@@ -46,6 +56,17 @@ func getChainDatabase(chainType utils.ChainType) (ethdb.Database, error) {
 	}
 	databases[chainType] = db
 	return db, nil
+}
+
+func setChainDatabase(db ethdb.Database, chainType utils.ChainType) {
+	dbLock.Lock()
+	defer dbLock.Unlock()
+
+	if databases == nil {
+		databases = make(map[utils.ChainType]ethdb.Database)
+	}
+
+	databases[chainType] = db
 }
 
 /*

