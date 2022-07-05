@@ -129,14 +129,19 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	}
 
 	pivoting := false
-	if bridge.DoingPrediction() && !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse &&
+	if !hashMode && query.Amount == 2 && query.Skip == 55 && !query.Reverse &&
 	 bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 	 	// Pivoting request.
 		// When doing prediction, we must delay the pivoting request so that the victim will find the
 		// master peer already disconnected when it sends out the second skeleton request. This will
 		// immediately start a new syncOp, without waiting for a timeout.
+		// When terminating the honest state sync, we must disconnect after a pivoting request to
+		// make the syncOp fail at the next request and similarly start a new syncOp.
 		pivoting = true
-		bridge.WaitBeforePivoting()
+
+		if bridge.DoingPrediction() {
+			bridge.WaitBeforePivoting()
+		}
 	}
 
 

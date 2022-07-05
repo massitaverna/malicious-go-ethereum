@@ -65,7 +65,7 @@ func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly bool) {
 	go o.addPeers(port)
 	go func() {
 		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
-		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild, false)
+		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild, 0, false)
 		if err != nil {
 			o.errc <- err
 			o.close()
@@ -367,6 +367,15 @@ func (o *Orchestrator) handleMessages() {
 					}
 				}()
 			case msg.ServeLastFullBatch.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
+			case msg.TerminatingStateSync.Code:
 				go func() {
 					err := o.sendAllExcept(message, sender)
 					if err != nil {

@@ -68,6 +68,10 @@ var (
 		Code: 14,
 		Content: nil,
 	}
+	TerminatingStateSync = &Message{
+		Code: 15,
+		Content: nil,
+	}
 
 )
 

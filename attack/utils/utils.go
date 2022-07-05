@@ -20,7 +20,7 @@ const (
 	ReadyPhase = AttackPhase(1)
 	PredictionPhase = AttackPhase(2)
 	SyncPhase = AttackPhase(3)
-	OtherPhase = AttackPhase(4)
+	DeliveryPhase = AttackPhase(4)
 
 	BatchSize = 192
 	NumBatchesForPrediction = 8		// Corresponds to m+1, with m parameter in Section 13 of the Write-Up
@@ -60,8 +60,8 @@ func (phase AttackPhase) ToChainType() ChainType {
 		return PredictionChain
 	case SyncPhase:
 		return TrueChain
-	case OtherPhase:
-		return OtherChain
+	case DeliveryPhase:
+		return FakeChain
 	default:
 		return InvalidChainType
 	}
@@ -77,8 +77,11 @@ func (phase AttackPhase) String() string {
 		return "prediction"
 	case SyncPhase:
 		return "sync"
+	case DeliveryPhase:
+		return "delivery"
 	default:
-		return "other"
+		panic(fmt.Errorf("Invalid attack phase: %d", byte(phase)))
+
 	}
 }
 

