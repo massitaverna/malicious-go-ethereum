@@ -13,15 +13,18 @@ func main() {
 	rebuild := flag.Bool("rebuild", false, "Rebuild underlying chain(s) and overwrite them in buildchain tool's directory")
 	port    := flag.String("port", "45678", "Specify port to listen on")
 	predictionOnly := flag.Bool("prediction-only", false, "Quit after leaking bitstring")
+	shortPrediction := flag.Bool("short-prediction", false, "Only leak 3 bits (and assume seed is 1). Useful for testing purposes")
+	overrideSeed := flag.Int("override-seed", -1, "Override leaked seed with specified one. Negative values do not override it")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
 	orch := orchestrator.New(errc)
-	orch.Start(*rebuild, *port, *predictionOnly)
-	//orch.Wait()							// Calling Wait() would cause a deadlock, because when the attack
-											// finishes, the orchestrator wants to send on errc and then quit,
+	orch.Start(*rebuild, *port, *predictionOnly, *shortPrediction, *overrideSeed)
+	//orch.Wait()							// Calling Wait() would cause a deadlock if errc was not buffered,
+											// because when the attack finishes,
+											// the orchestrator wants to send on errc and then quit,
 											// but here the main is not receiving on errc until the orch quits.
-											// However, at this stage of the development Wait() may not be needed
+											// However, at the end of the development, Wait() may not be needed
 											// any longer and could be removed from orchestrator.go
 
 	err := <-errc							// Wait for something to happen

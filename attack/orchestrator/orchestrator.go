@@ -35,6 +35,9 @@ type Orchestrator struct {
 	syncOps int
 	syncCh chan struct{}
 	predictionOnly bool
+	requiredOracleBits int
+	seed int32
+	done chan struct{}
 
 }
 
@@ -55,12 +58,15 @@ func New(errc chan error) *Orchestrator {
 		syncOps: 0,
 		syncCh: make(chan struct{}),
 		predictionOnly: false,
+		requiredOracleBits: utils.RequiredOracleBits,
+		seed: int32(-1),
+		done: make(chan struct{}),
 	}
 
 	return o
 }
 
-func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly bool) {
+func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly, shortPrediction bool, overriddenSeed int) {
 	go o.handleMessages()
 	go o.addPeers(port)
 	go func() {
@@ -75,6 +81,15 @@ func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly bool) {
 	}()
 
 	o.predictionOnly = predictionOnly
+
+	if shortPrediction {
+		o.requiredOracleBits = 3
+		o.seed = int32(1)
+	}
+
+	if overriddenSeed >= 0 {
+		o.seed = int32(overriddenSeed)
+	}
 
 	if o.localMaliciousPeers {
 		//TODO: Start two peers with 'mgeth'
@@ -186,14 +201,14 @@ func (o *Orchestrator) leadAttack() {
 		fmt.Println("Received new oracle bit:", bit)
 		oracleReply = append(oracleReply, bit)
 		
-		if len(oracleReply) == utils.RequiredOracleBits - 1 {	// We got all but one oracle bits, so we notify
+		if len(oracleReply) == o.requiredOracleBits - 1 {		// We got all but one oracle bits, so we notify
 																// the peers that they are now leaking the last one.
 																// However, we notify this only after one has been
 																// chosen as master peer, to ease phase transition.
 																// For the same goal, we relay the SetVictim message
 																// only after LastOracleBit has been sent.
 			for {
-				if o.syncOps == utils.RequiredOracleBits {
+				if o.syncOps == o.requiredOracleBits {
 					break
 				}
 				time.Sleep(100*time.Millisecond)
@@ -201,15 +216,22 @@ func (o *Orchestrator) leadAttack() {
 			o.sendAll(msg.LastOracleBit)
 			o.syncCh <- struct{}{}
 		}
-		if len(oracleReply)==utils.RequiredOracleBits {
+		if len(oracleReply)==o.requiredOracleBits {
 			fmt.Println("Leaked bitstring:", oracleReply)
-			seed, err := recoverSeed(oracleReply)
-			if err != nil {
-				fmt.Println("Could not recover seed")
-				o.errc <- err
-				return
+
+			if o.seed < 0 {
+				seed, err := recoverSeed(oracleReply)
+				if err != nil {
+					fmt.Println("Could not recover seed")
+					o.errc <- err
+					return
+				}
+				fmt.Println("Recovered seed:", seed)
+				o.seed = seed
+			} else {
+				fmt.Println("Using overridden seed", o.seed)
 			}
-			fmt.Println("Recovered seed:", seed)
+
 			break
 		}
 	}
@@ -222,6 +244,8 @@ func (o *Orchestrator) leadAttack() {
 	o.attackPhase = utils.SyncPhase
 	fmt.Println("Started", o.attackPhase, "phase")
 	// From here on, we develop the second phase of the attack
+
+	<-o.done 	// Wait for the attack to finish
 
 
 
@@ -325,7 +349,7 @@ func (o *Orchestrator) handleMessages() {
 					return
 				}
 				go func() {
-					if o.syncOps == utils.RequiredOracleBits {
+					if o.syncOps == o.requiredOracleBits {
 						<-o.syncCh
 					}
 					err := o.sendAllExcept(message, sender)
