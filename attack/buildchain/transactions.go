@@ -31,7 +31,16 @@ var (
 )
 
 func accountsPerRange() uint64 {
-	return numAccounts/ranges
+	res := numAccounts/ranges
+	if res == 0 {
+		return 1
+	}
+	return res
+}
+
+func accountsOutOfRanges() uint64 {		// Returns the accounts that still need to be created after
+										// creating accountsPerRange() accounts in each range.
+	return numAccounts % ranges
 }
 
 func resetGasPool() {
@@ -85,12 +94,20 @@ func autoTransactions(howMany int, header *types.Header, bc *core.BlockChain, st
 	bigAcctsPerRange := big.NewInt(int64(accountsPerRange()))
 
 	for i:=0; i < howMany; i++ {
-		bigNonce := big.NewInt(int64(nonce))
-		base := new(big.Int).Div(bigNonce, bigAcctsPerRange)
-		addrTo := new(big.Int).Mul(utils.RangeOne, base)
-		mod := new(big.Int).Mod(bigNonce, bigAcctsPerRange)
-		addrTo.Add(addrTo, mod)
-		to := common.BigToAddress(addrTo)
+		var to common.Address
+		// Accounts to create equally over all ranges
+		if nonce <= numAccounts - accountsOutOfRanges() {
+			bigNonce := big.NewInt(int64(nonce))
+			base := new(big.Int).Div(bigNonce, bigAcctsPerRange)
+			addrTo := new(big.Int).Mul(utils.RangeOne, base)
+			mod := new(big.Int).Mod(bigNonce, bigAcctsPerRange)
+			addrTo.Add(addrTo, mod)
+			to = common.BigToAddress(addrTo)
+		// Extra accounts get created in the first range
+		} else {
+			mod := big.NewInt(int64(nonce % ranges))
+			to = common.BigToAddress(new(big.Int).Add(bigAcctsPerRange, mod))
+		}
 		tx, rcpt, err := transfer(coinbase, to, coinbase, header, bc, statedb, chainConfig)
 		if err != nil {
 			fmt.Println("Automatic transactions failed\t\tnum=", i)
