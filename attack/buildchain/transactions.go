@@ -17,7 +17,7 @@ import (
 
 const (
 	ranges = uint64(16)
-	gasForSimpleTx = uint64(21000)
+	//gasForSimpleTx = uint64(21000)
 )
 
 var (
@@ -25,6 +25,7 @@ var (
 	gasPool *core.GasPool
 	nonce = uint64(0)
 	bigZero = big.NewInt(0)
+	bigTen = big.NewInt(10)
 	oneWei = big.NewInt(1)
 	//maxFeePerGas = big.NewInt(100)
 	onlyRewardsBlocks = 1
@@ -32,9 +33,11 @@ var (
 
 func accountsPerRange() uint64 {
 	res := numAccounts/ranges
+	/*
 	if res == 0 {
 		return 1
 	}
+	*/
 	return res
 }
 
@@ -67,7 +70,7 @@ func transfer(from, to, coinbase common.Address, header *types.Header, bc *core.
 		Nonce: nonce,
 		GasTipCap: bigZero,
 		GasFeeCap: baseFee,
-		Gas: gasForSimpleTx,
+		Gas: params.TxGas,
 		To: &to,
 		Value: oneWei,
 	}
@@ -77,12 +80,15 @@ func transfer(from, to, coinbase common.Address, header *types.Header, bc *core.
 		fmt.Println("Could not sign transaction")
 		return nil, nil, err
 	}
-	//message := types.NewMessage(from, &to, nonce, oneWei, gasForSimpleTx, baseFee, maxFeePerGas, bigZero, nil, nil, false)
 
+	fmt.Println("Trying tx, nonce=", nonce, "gasPool=", gasPool, "GasUsed=", header.GasUsed, "gasLimit=", header.GasLimit)
 	receipt, err := core.ApplyTransaction(chainConfig, bc, &coinbase, gasPool, statedb, header, tx, &header.GasUsed, vmcfg)
 	if err != nil {
 		fmt.Println("Could not apply transaction\t\t", "headerNumber=", header.Number, "nonce=", nonce, "to=", to)
 		return nil, nil, err
+	} else if receipt.Status == types.ReceiptStatusFailed {
+		fmt.Println("Transaction failed\t\t", "headerNumber=", header.Number, "nonce=", nonce, "to=", to)
+		return nil, nil, utils.StateError
 	}
 	nonce++
 	return tx, receipt, nil
@@ -96,17 +102,23 @@ func autoTransactions(howMany int, header *types.Header, bc *core.BlockChain, st
 	for i:=0; i < howMany; i++ {
 		var to common.Address
 		// Accounts to create equally over all ranges
-		if nonce <= numAccounts - accountsOutOfRanges() {
+		if nonce < numAccounts - accountsOutOfRanges() {
 			bigNonce := big.NewInt(int64(nonce))
 			base := new(big.Int).Div(bigNonce, bigAcctsPerRange)
 			addrTo := new(big.Int).Mul(utils.RangeOne, base)
 			mod := new(big.Int).Mod(bigNonce, bigAcctsPerRange)
 			addrTo.Add(addrTo, mod)
+			addrTo.Add(addrTo, bigTen)				// Actually, only needed in range 0, as addresses
+													// 0x1 - 0x9 are "reserved". However, for symmetry
+													// we always add an offset of 10 to addresses, no
+													// matter the range.
 			to = common.BigToAddress(addrTo)
 		// Extra accounts get created in the first range
 		} else {
 			mod := big.NewInt(int64(nonce % ranges))
-			to = common.BigToAddress(new(big.Int).Add(bigAcctsPerRange, mod))
+			addrTo := new(big.Int).Add(bigAcctsPerRange, mod)
+			addrTo.Add(addrTo, bigTen)
+			to = common.BigToAddress(addrTo)
 		}
 		tx, rcpt, err := transfer(coinbase, to, coinbase, header, bc, statedb, chainConfig)
 		if err != nil {

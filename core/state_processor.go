@@ -117,6 +117,7 @@ func applyTransaction(msg types.Message, config *params.ChainConfig, bc ChainCon
 	receipt := &types.Receipt{Type: tx.Type(), PostState: root, CumulativeGasUsed: *usedGas}
 	if result.Failed() {
 		receipt.Status = types.ReceiptStatusFailed
+		fmt.Println("Tx failed: err =", result.Err)
 	} else {
 		receipt.Status = types.ReceiptStatusSuccessful
 	}
