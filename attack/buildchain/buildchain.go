@@ -279,12 +279,13 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
 
 			// Include a tx early on in the chain to avoid geth bug about legacy receipts.
+			// (if creating accounts was requested)
 			if i == onlyRewardsBlocks + 1 && numTxs == 0 && numAccounts > 0 {
 				numTxs++
 			}
 			if i == length && numAccounts > 0 {
 				if numTxs == 0 {
-					numTxs--
+					numTxs--		// Subtract first tx created above
 				}
 				numTxs += int(numAccounts) % (length-onlyRewardsBlocks)
 			}

@@ -43,6 +43,10 @@ func main() {
 		if err != nil {
 			fmt.Println("Could not build the chain")
 			fmt.Println("err =", err)
+			if isFlagPassed("export") {
+				fmt.Println("Not exporting because build failed")
+				return
+			}
 		}
 	}
 

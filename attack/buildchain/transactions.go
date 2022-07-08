@@ -81,7 +81,6 @@ func transfer(from, to, coinbase common.Address, header *types.Header, bc *core.
 		return nil, nil, err
 	}
 
-	fmt.Println("Trying tx, nonce=", nonce, "gasPool=", gasPool, "GasUsed=", header.GasUsed, "gasLimit=", header.GasLimit)
 	receipt, err := core.ApplyTransaction(chainConfig, bc, &coinbase, gasPool, statedb, header, tx, &header.GasUsed, vmcfg)
 	if err != nil {
 		fmt.Println("Could not apply transaction\t\t", "headerNumber=", header.Number, "nonce=", nonce, "to=", to)
