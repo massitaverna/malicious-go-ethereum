@@ -247,7 +247,6 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	}
 
 	numDone := 1 // Genesis block is already done
-	numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
 
 	for i := 1; i <= length; i++ {
 		currHeader := &types.Header{
@@ -269,13 +268,24 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		td.Add(td, currHeader.Difficulty)
 
 		var block *types.Block
+
 		// Use the first onlyRewardsBlocks blocks to just generate block rewards,
 		// while the following ones to create accounts as well.
 		if i <= onlyRewardsBlocks || chainType != utils.TrueChain {
 			block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
+		
+		// Transfer some wei to many accounts.
 		} else {
-			// Transfer some wei to many accounts
-			if i == length {
+			numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
+
+			// Include a tx early on in the chain to avoid geth bug about legacy receipts.
+			if i == onlyRewardsBlocks + 1 && numTxs == 0 && numAccounts > 0 {
+				numTxs++
+			}
+			if i == length && numAccounts > 0 {
+				if numTxs == 0 {
+					numTxs--
+				}
 				numTxs += int(numAccounts) % (length-onlyRewardsBlocks)
 			}
 			txs, receipts, err := autoTransactions(numTxs, currHeader, blockchain, ethState, chainConfig)
