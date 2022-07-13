@@ -622,8 +622,22 @@ func LastFullBatch(from uint64) bool {
 }
 
 func LastPartialBatch(from uint64) bool {
-	if (from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches)) {
-		return true
+	// For now, we always hit this first if-block because we don't need this function in other places
+	// than the prediction phase.
+	if true || DoingPredictionOrReady() {
+		if (from-1)%utils.BatchSize == 0 && (from-1)/utils.BatchSize == uint64(len(servedBatches)) {
+			return true
+		}
+		return false
+	}
+
+	// This might get useful in the future, but we must check if it interferes with the end of the prediction
+	// phase where the variable 'attackPhase' has already been updated to SyncPhase.
+	if false && DoingSync() {
+		if from + utils.BatchSize >= fixedHead {
+			return true
+		}
+		return false
 	}
 	return false
 }
@@ -711,6 +725,7 @@ func StopMoving() bool {
 	if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
 		if fixedHead == 0 {
 			fixedHead = headNumber
+			log("Fixed head for sync phase,", "number =", fixedHead)
 		}
 		return true
 	}

@@ -195,7 +195,8 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			break
 		}
 
-		if bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() {
+		if bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			log.Info("Limiting query results", "fixedHead", bridge.FixedHead(), "origin", query.Origin.Number)
 			break
 		}
 
@@ -264,11 +265,19 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 	if count > maxHeadersServe {
 		count = maxHeadersServe
 	}
+
 	if query.Origin.Hash == (common.Hash{}) {
 		// Number mode, just return the canon chain segment. The backend
 		// delivers in [N, N-1, N-2..] descending order, so we need to
 		// accommodate for that.
+
 		from := query.Origin.Number
+
+		if bridge.StopMoving() && from + count > bridge.FixedHead() && !query.Reverse &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			count = bridge.FixedHead() - from
+		}
+
 		if !query.Reverse {
 			from = from + count - 1
 		}
@@ -290,7 +299,10 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
 		}
 
-		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() {
+		// Note that the last partial batch cannot be 192 blocks in sync phase. Indeed, if it was 192 blocks,
+		// as the head is fixed, it would be included in the skeleton, and therefore it would not be the last
+		// partial batch. This would then have length 0.
+		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() {	
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
 		}

