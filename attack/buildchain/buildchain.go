@@ -179,15 +179,17 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		Number: big.NewInt(0),
 		GasLimit: uint64(0x4c4b40),	//5,000,000
 		GasUsed: uint64(0),
-		Time: uint64(0),
+		Time: uint64(0), //Later on, set it to uint64(1646002800)
 		Extra: params.DAOForkBlockExtra,
 		MixDigest: common.HexToHash("0x0"),
 		Nonce: types.EncodeNonce(uint64(0x2763ab980cd417ef)),
-		BaseFee: big.NewInt(params.InitialBaseFee),
+		//BaseFee: big.NewInt(params.InitialBaseFee),
 	}
 
 	chainConfig := params.MainnetChainConfig
-	if chainType != utils.PredictionChain {			// Both the true chain and the fake segment need to be at
+
+	// For now, we use this in every case. Later on, we will load the right config from file.
+	if true || chainType != utils.PredictionChain {			// Both the true chain and the fake segment need to be at
 													// the last Ethereum fork, in order for the simulation to
 													// be as real as possible.
 		chainConfig = &params.ChainConfig{
@@ -210,6 +212,8 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			//GrayGlacierBlock:    big.NewInt(0),
 			Ethash:              new(params.EthashConfig),
 		}
+
+		genesisHeader.BaseFee = big.NewInt(params.InitialBaseFee)
 	}
 
 	// Create Ethereum state
@@ -263,7 +267,11 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			GasUsed: uint64(0),
 			Time: lastHeader.Time + uint64(13),
 			Extra: params.DAOForkBlockExtra,
-			BaseFee: misc.CalcBaseFee(chainConfig, lastHeader),
+			//BaseFee: misc.CalcBaseFee(chainConfig, lastHeader),
+		}
+		// Again, we do this always. Later on, we'll see from config file.
+		if true || chainType != utils.PredictionChain {
+			currHeader.BaseFee = misc.CalcBaseFee(chainConfig, lastHeader)
 		}
 		td.Add(td, currHeader.Difficulty)
 
@@ -335,6 +343,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		}
 	}
 	rawdb.WriteHeadHeaderHash(chainDb, lastHeader.Hash())
+	rawdb.WriteHeadBlockHash(chainDb, lastHeader.Hash())
 
 	// Explicit Write() shouldn't be necessary now as chainDb.Close() already flushes to disk.
 	/*

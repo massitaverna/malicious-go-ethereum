@@ -118,14 +118,14 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	p.td, p.head = status.TD, status.Head
 	log.Info("Peer announced its TD", "peer", p.Peer.ID().String()[:8], "td", status.TD)
 
-	higherTd, mustCheat, errb := bridge.CheatAboutTd(p.Peer.ID().String()[:8], status.TD)
+	higherTd, mustCheat, higherHead, errb := bridge.CheatAboutTd(p.Peer.ID().String()[:8], status.TD)
 	if errb != nil {
 		return errb
 	}
 	if mustCheat {
 		log.Info("Cheating about TD", "peer", p.Peer.ID().String()[:8], "td", higherTd)
 		td = higherTd
-		head = bridge.Latest().Hash()
+		head = *higherHead
 	} else {
 		log.Info("Not cheating about TD", "peer", p.Peer.ID().String()[:8], "td", td)
 	}

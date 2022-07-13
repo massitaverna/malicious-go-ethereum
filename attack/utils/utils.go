@@ -46,10 +46,10 @@ var (
 	
 	HigherTd = new(big.Int).Mul(big.NewInt(1_000_000_000_000), big.NewInt(1_000_000_000_000)) // 10^24
 	headersDownloadTime = 5*60
-	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(int64(90*headersDownloadTime/1300)))
-																// This corresponds to the TD of 90% of the number of
+	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(int64(85*headersDownloadTime/1300)))
+																// This corresponds to the TD of 85% of the number of
 																// new blocks mined during the headers download.
-																// For a real attack, this would be ca. 500 (2hrs).
+																// For a real attack, this would be ca. 470 (2hrs).
 
 	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
 )

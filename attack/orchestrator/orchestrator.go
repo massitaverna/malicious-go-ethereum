@@ -158,12 +158,12 @@ func (o *Orchestrator) addPeers(port string) {
 		Here, we arbitrarily choose to make the attack start after bootingTime seconds from when the two
 		malicious peers are ready. In other words, the attacker doesn't look for a victim in the first
 		bootingTime seconds. This simulates the fact that a real attacker has its Ethereum nodes in
-		standard operation and at some point he switches them to "attack mode".
+		standard operation and at some point, later on, he switches them to "attack mode".
 		When this happens, one of the two will stop accepting new peers from the network until a victim
 		is picked: this is another reason why we want to keep both nodes in "normal operation" at the
 		beginning, i.e. to establish some peering connections to other honest nodes.
 		*/
-		bootingTime := 60*time.Second
+		bootingTime := 30*time.Second
 		if o.peerset.len() >= 2 && o.attackPhase==utils.StalePhase && o.chainBuilt {
 			go func() {
 				time.Sleep(bootingTime)
@@ -212,9 +212,12 @@ func (o *Orchestrator) leadAttack() {
 					break
 				}
 				time.Sleep(100*time.Millisecond)
+				//fmt.Println("Sleeping...")
 			}
 			o.sendAll(msg.LastOracleBit)
+			//fmt.Println("Writing to o.syncCh")
 			o.syncCh <- struct{}{}
+			//fmt.Println("Wrote to o.syncCh")
 		}
 		if len(oracleReply)==o.requiredOracleBits {
 			fmt.Println("Leaked bitstring:", oracleReply)
@@ -322,6 +325,7 @@ func (o *Orchestrator) handleMessages() {
 		case peermsg := <-o.incoming:
 			message := peermsg.message
 			sender := peermsg.peer
+			//fmt.Println("New message, code:", message.Code)
 
 			switch message.Code {
 			case msg.BatchRequestServed.Code:
@@ -360,8 +364,11 @@ func (o *Orchestrator) handleMessages() {
 					}
 				}()
 			case msg.SetAttackPhase.Code:
-				o.attackPhase = utils.AttackPhase(message.Content[0])
-				fmt.Println("Started", o.attackPhase, "phase")
+				attackPhase := utils.AttackPhase(message.Content[0])
+				if attackPhase != o.attackPhase {
+					o.attackPhase = attackPhase
+					fmt.Println("Started", o.attackPhase, "phase")
+				}
 				go func() {
 					err := o.sendAllExcept(message, sender)
 					if err != nil {

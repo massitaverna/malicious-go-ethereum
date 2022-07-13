@@ -108,8 +108,11 @@ func getTd(chainType utils.ChainType) *big.Int {
 	if err != nil {
 		fatal(err, "Could not get total difficulty of", chainType, "chain")
 	}
-	hash := rawdb.ReadHeadHeaderHash(db)
+	hash := rawdb.ReadHeadBlockHash(db)
 	number := rawdb.ReadHeaderNumber(db, hash)
+	if chainType == utils.TrueChain {
+		log("True head:", number, hash)
+	}
 	return rawdb.ReadTd(db, hash, *number)
 }
 
