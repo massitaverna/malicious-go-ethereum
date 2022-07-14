@@ -740,7 +740,7 @@ func stopMovingChecker() {
 	for {
 		time.Sleep(1*time.Second)
 
-		if attackPhase != utils.SyncPhase {
+		if attackPhase != utils.SyncPhase || announcedSyncTD == nil {
 			continue
 		}
 
