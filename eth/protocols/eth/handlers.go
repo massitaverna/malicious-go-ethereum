@@ -117,12 +117,14 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	first := true
 	maxNonCanonical := uint64(100)
 
+	queryForMaster := false
 	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Amount == 2 && query.Skip == 63 && query.Reverse {
 		//bridge.SetMasterPeer()
 		bridge.SetVictimIfNone(peer.Peer)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
 		}
+		queryForMaster = true
 
 		bq := &bridge.GetBlockHeadersPacket{
 			Origin: bridge.HashOrNumber{Hash: query.Origin.Hash, Number: query.Origin.Number},
@@ -169,6 +171,8 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		headers []rlp.RawValue
 		unknown bool
 		lookups int
+
+		headForMasterQuery uint64
 	)
 	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
 		len(headers) < maxHeadersServe && lookups < 2*maxHeadersServe {
@@ -182,6 +186,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				origin = chain.GetHeaderByHash(query.Origin.Hash)
 				if origin != nil {
 					query.Origin.Number = origin.Number.Uint64()
+					headForMasterQuery = query.Origin.Number
 				} else {
 					log.Info("Can't find origin")
 				}
@@ -206,6 +211,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			headers = append(headers, rlp.RawValue(rlpData))
 			bytes += common.StorageSize(len(rlpData))
 		}
+
+		if len(headers) == 2 && pivoting {
+			bridge.SetPivot(query.Origin.Number)
+		}
+
 		// Advance to the next header of the query
 		switch {
 		case hashMode && query.Reverse:
@@ -254,6 +264,9 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 	}
 
+	if queryForMaster && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		bridge.SetPivot(headForMasterQuery-64)
+	}
 	if pivoting {
 		bridge.PivotingServed()
 	}
@@ -273,8 +286,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 
 		from := query.Origin.Number
 
-		if bridge.StopMoving() && from + count > bridge.FixedHead() && !query.Reverse &&
-		 bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		if bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.StopMoving() &&
+		from + count > bridge.FixedHead() && !query.Reverse {
 			count = bridge.FixedHead() - from
 		}
 
@@ -302,7 +315,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Note that the last partial batch cannot be 192 blocks in sync phase. Indeed, if it was 192 blocks,
 		// as the head is fixed, it would be included in the skeleton, and therefore it would not be the last
 		// partial batch. This would then have length 0.
-		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() {	
+		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {	
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
 		}

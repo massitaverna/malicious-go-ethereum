@@ -103,6 +103,16 @@ func genesis(chainType utils.ChainType) *types.Header {
 	return header
 }
 
+func getHeaderByNumber(chainType utils.ChainType, number uint64) *types.Header {
+	db, err := getChainDatabase(chainType)
+	if err != nil {
+		fatal(err, "Could not get block", number, "of", chainType, "chain")
+	}
+	hash := rawdb.ReadCanonicalHash(db, number)
+	header := rawdb.ReadHeader(db, hash, number)
+	return header
+}
+
 func getTd(chainType utils.ChainType) *big.Int {
 	db, err := getChainDatabase(chainType)
 	if err != nil {
@@ -110,9 +120,6 @@ func getTd(chainType utils.ChainType) *big.Int {
 	}
 	hash := rawdb.ReadHeadBlockHash(db)
 	number := rawdb.ReadHeaderNumber(db, hash)
-	if chainType == utils.TrueChain {
-		log("True head:", number, hash)
-	}
 	return rawdb.ReadTd(db, hash, *number)
 }
 

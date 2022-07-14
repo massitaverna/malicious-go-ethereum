@@ -52,9 +52,9 @@ var (
 		Code: 10,
 		Content: []byte{0},
 	}
-	SolicitMustDisconnectVictim = &Message{
+	AnnouncedSyncTd = &Message{
 		Code: 11,
-		Content: nil,
+		Content: []byte{0},
 	}
 	Terminate = &Message{
 		Code: 12,

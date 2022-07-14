@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 var (
@@ -505,6 +507,12 @@ func (db *Database) Dereference(root common.Hash) {
 		log.Error("Attempted to dereference the trie cache meta root")
 		return
 	}
+
+	if bridge.RootAtPivot() == root {
+		log.Info("Not dereferencing root node at pivot")
+		return
+	}
+
 	db.lock.Lock()
 	defer db.lock.Unlock()
 

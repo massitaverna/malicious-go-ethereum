@@ -212,12 +212,12 @@ func (o *Orchestrator) leadAttack() {
 					break
 				}
 				time.Sleep(100*time.Millisecond)
-				//fmt.Println("Sleeping...")
+				fmt.Println("Sleeping...")
 			}
 			o.sendAll(msg.LastOracleBit)
-			//fmt.Println("Writing to o.syncCh")
+			fmt.Println("Writing to o.syncCh")
 			o.syncCh <- struct{}{}
-			//fmt.Println("Wrote to o.syncCh")
+			fmt.Println("Wrote to o.syncCh")
 		}
 		if len(oracleReply)==o.requiredOracleBits {
 			fmt.Println("Leaked bitstring:", oracleReply)
@@ -388,6 +388,7 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 				}()
+			/*
 			case msg.SolicitMustDisconnectVictim.Code:
 				go func() {
 					err := o.sendAllExcept(message, sender)
@@ -397,7 +398,17 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 				}()
+			*/
 			case msg.ServeLastFullBatch.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
+			case msg.AnnouncedSyncTd.Code:
 				go func() {
 					err := o.sendAllExcept(message, sender)
 					if err != nil {

