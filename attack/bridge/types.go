@@ -13,3 +13,10 @@ type GetBlockHeadersPacket struct {
 	Skip uint64
 	Reverse bool
 }
+
+/*
+type prngSteps struct {
+	frequency int
+	num int
+}
+*/

@@ -48,9 +48,9 @@ var (
 		Code: 9,
 		Content: []byte{0},
 	}
-	MustDisconnectVictim = &Message{
+	Rollback = &Message{
 		Code: 10,
-		Content: []byte{0},
+		Content: nil,
 	}
 	AnnouncedSyncTd = &Message{
 		Code: 11,
@@ -71,6 +71,10 @@ var (
 	TerminatingStateSync = &Message{
 		Code: 15,
 		Content: nil,
+	}
+	InfoPRNG = &Message{
+		Code: 16,
+		Content: []byte("00000000"),
 	}
 
 )

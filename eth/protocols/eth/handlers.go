@@ -158,10 +158,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 	}
 
-	//skeleton := false
-	if !hashMode && query.Amount == 128 && query.Skip == 192 {
+	skeleton := false
+	if !hashMode && query.Amount == 128 && query.Skip == 191 {
 		bridge.SetSkeletonStart(query.Origin.Number)
-		//skeleton = true
+		skeleton = true
 	}
 
 
@@ -270,6 +270,9 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if pivoting {
 		bridge.PivotingServed()
 	}
+	if skeleton {
+		bridge.StepPRNG(2*len(headers), 100)
+	}
 	return headers
 }
 
@@ -288,7 +291,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.StopMoving() &&
 		from + count > bridge.FixedHead() && !query.Reverse {
-			count = bridge.FixedHead() - from
+			count = bridge.FixedHead() - from + 1
 		}
 
 		if !query.Reverse {
@@ -302,15 +305,26 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			}
 		}
 
-		// Introducing delay and marking batch as served
-		if query.Amount == 192 && query.Skip == 0 && query.Reverse == false &&
-		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.DoingPredictionOrReady() {
-			bridge.DelayBeforeServingBatch()
-			if bridge.LastFullBatch(query.Origin.Number) {
-				bridge.WaitBeforeLastFullBatch()
-			}
-			bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
-		}
+		if query.Amount == 192 && !query.Reverse && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+
+			// Introducing delay and marking batch as served
+		 	if bridge.DoingPredictionOrReady() {
+		 		bridge.DelayBeforeServingBatch()
+				if bridge.LastFullBatch(query.Origin.Number) {
+					bridge.WaitBeforeLastFullBatch()
+				}
+				bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
+		 	}
+
+		 	/*
+		 	This is WRONG, as the master peer only serves some of the batches.
+		 	
+		 	// Mark PRNG steps, for all full batches of prediction and sync phases.
+		 	if len(headers) == 192 {
+		 		bridge.StepPRNG(2, 100)
+		 	}
+		 	*/
+		 }
 
 		// Note that the last partial batch cannot be 192 blocks in sync phase. Indeed, if it was 192 blocks,
 		// as the head is fixed, it would be included in the skeleton, and therefore it would not be the last
@@ -318,6 +332,15 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {	
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
+
+			// Mark PRNG steps, for last partial batch of sync phase.
+			bridge.StepPRNG(len(headers) - 1, 1)	// All headers will be verified, apart from the last two
+													// as mini reorg delay (-2). However, as checkFrequency == 1
+													// now, there is one additional (and useless) call to the PRNG (+1).
+													// So we have len(headers) -2 + 1 calls to the PRNG.
+
+			bridge.StepPRNG(3, 1)					// Mark last 2 headers in advance (+1 for useless call)
+			bridge.CommitPRNG()
 		}
 
 		return headers

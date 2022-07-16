@@ -50,6 +50,8 @@ var skeletonStart uint64
 var fixedHead uint64
 var pivot uint64
 var rootAtPivot common.Hash
+var prngSteps map[int]int
+var rollback bool
 
 
 
@@ -104,6 +106,10 @@ func Initialize(id string) error {
 	terminatingStateSync = false
 	p2p.NoNewConnections = &avoidVictim
 	//servedAccounts = big.NewInt(0)
+	prngSteps = make(map[int]int)
+	prngSteps[1] = 0
+	prngSteps[100] = 0
+	rollback = false
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -172,6 +178,9 @@ func SetVictimIfNone(v *p2p.Peer) {
 				fatal(err, "Could not announce new phase to orchestrator")
 			}
 			*/
+		} else if attackPhase == utils.SyncPhase {
+			go stopMovingChecker()
+			go rollbackChecker()
 		}
 
 		log("Set victim:", vID)
@@ -359,7 +368,7 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 	}
 }
 
-func ServedLastRangeQuery() {
+func ReceivedLastRangeQuery() {
 	/*
 	Upon receiving last query of state sync, we need to make the current syncOp fail.
 	To do so, we disconnect from the victim.
@@ -368,13 +377,14 @@ func ServedLastRangeQuery() {
 	// For now, we wait for the phase to switch to sync. Later on, this function should be automatically
 	// called when the phase has already switched. Thus, the goroutine may become unnecessary.
 	go func() {
+		return // Remove this to enable correct behaviour
 		for attackPhase != utils.SyncPhase {
 			time.Sleep(100*time.Millisecond)
 		}
 		if !master {
 			victimLock.Lock()
 			terminatingStateSync = true
-			victim.Disconnect(p2p.DiscUselessPeer)		// Is this enough to make the victim immediately fail the syncOp?
+			victim.Disconnect(p2p.DiscUselessPeer)
 			victimLock.Unlock()
 		}
 	}()
@@ -544,12 +554,14 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 												// from genesis and not just the difficulty of the fake segment.
 			head := latest(utils.FakeChain).Hash()
 
-			go func() {
-				err := sendMessage(msg.TerminatingStateSync)
-				if err != nil {
-					fatal(err, "Could not notify state sync termination")
-				}
-			}()
+			if attackPhase==utils.SyncPhase && terminatingStateSync {
+				go func() {
+					err := sendMessage(msg.TerminatingStateSync)
+					if err != nil {
+						fatal(err, "Could not notify state sync termination")
+					}
+				}()
+			}
 
 			return td, mustCheatAboutTd, &head, nil
 		}
@@ -732,6 +744,37 @@ func SetAnnouncedSyncTD(td *big.Int) {
 }
 
 func SetSkeletonStart(start uint64) {
+	// Keep track of skeleton only during sync phase.
+	if attackPhase != utils.SyncPhase {
+		return
+	}
+
+	// This skeleton announcement may be following a rollback. In this case, we need to update the info
+	// on the PRNG state.
+	if rollback {
+		rollback = false
+		err := sendMessage(msg.Rollback.SetContent([]byte{0}))
+		if err != nil {
+			fatal(err, "Could not notify update to 'rollback'")
+		}
+		ancestor := start - utils.BatchSize
+		lastProcessed := ancestor + 2048
+
+		// Relative position of lastProcessed in the previous skeleton.
+		// E.g., if the previous skeleton was (24576)-24768-24960-... and lastProcessed == 24961,
+		// then relPosition == 384 as it is block 0 (i.e. the first one) of the third batch of the skeleton.
+		relPosition := (lastProcessed - skeletonStart + utils.BatchSize - 1)
+		unverifiedBatches := 128 - relPosition/utils.BatchSize
+
+		// If the rollback happened because a peer of the victim provided a well-formed batch with an invalid
+		// PoW at some block, then seals for that batch were already generated and we should count them, that is,
+		// we should do 'unverifiedBatches--'.
+		// However, there's no way to know this, so we assume the reason is a malformed batch.
+		// In other words, we assume other peers to behave "not too maliciously".
+
+		StepPRNG(-2*int(unverifiedBatches), 100)
+	}
+
 	skeletonStart = start
 }
 
@@ -739,6 +782,10 @@ func SetSkeletonStart(start uint64) {
 func stopMovingChecker() {
 	for {
 		time.Sleep(1*time.Second)
+
+		if !master {
+			return
+		}
 
 		if attackPhase != utils.SyncPhase || announcedSyncTD == nil {
 			continue
@@ -788,6 +835,38 @@ func SetPivot(pivotNumber uint64) {
 
 func RootAtPivot() common.Hash {
 	return rootAtPivot
+}
+
+func StepPRNG(num, frequency int) {
+	if frequency != 1 && frequency != 100 {
+		fatal(utils.ParameterErr, "checkFrequency has an unusual value:", frequency)
+	}
+	prngSteps[frequency] += num
+}
+
+func CommitPRNG() {
+	steps_1 := make([]byte, 4)
+	steps_100 := make([]byte, 4)
+	binary.BigEndian.PutUint32(steps_1, uint32(prngSteps[1]))
+	binary.BigEndian.PutUint32(steps_100, uint32(prngSteps[100]))
+	content := make([]byte, 0)
+	content = append(content, steps_1...)
+	content = append(content, steps_100...)
+	err := sendMessage(msg.InfoPRNG.SetContent(content))
+	if err != nil {
+		fatal(err, "Could not commit PRNG info")
+	}
+}
+
+
+func rollbackChecker() {
+	<-dropped
+	rollback = true
+	err := sendMessage(msg.Rollback.SetContent([]byte{1}))
+	if err != nil {
+		fatal(err, "Could not notify update to 'rollback'")
+	}
+	master = false
 }
 
 
@@ -868,7 +947,6 @@ func handleMessages() {
 				if attackPhase == utils.PredictionPhase && lastOracleBit {
 					attackPhase = utils.SyncPhase
 					log("Switched to", attackPhase, "phase")
-					go stopMovingChecker()
 				}
 				avoidVictim = false
 				victimLock.Unlock()
@@ -881,6 +959,9 @@ func handleMessages() {
 					log("Attack phase switched to", attackPhase)
 					if attackPhase != utils.StalePhase && attackPhase != utils.SyncPhase {
 						mustChangeAttackChain = true
+					}
+					if attackPhase == utils.DeliveryPhase {
+						CommitPRNG()
 					}
 				}
 			case msg.ServeLastFullBatch.Code:
@@ -909,10 +990,19 @@ func handleMessages() {
 					}
 					log("Switched to", attackPhase, "phase")
 					mustChangeAttackChain = true
+
+					CommitPRNG()
 				}()
 			case msg.AnnouncedSyncTd.Code:
 				announcedSyncHead = common.BytesToHash(message.Content[:common.HashLength])
 				announcedSyncTD = new(big.Int).SetBytes(message.Content[common.HashLength:])
+			case msg.Rollback.Code:
+				switch message.Content[0] {
+				case 0:
+					rollback = false
+				case 1:
+					rollback = true
+				}
 			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {

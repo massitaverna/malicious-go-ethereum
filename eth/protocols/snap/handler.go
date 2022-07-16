@@ -171,9 +171,9 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		accounts, proofs := ServiceGetAccountRangeQuery(backend.Chain(), &req)
 
 		if lastResponse {
-			bridge.ServedLastRangeQuery()
+			bridge.ReceivedLastRangeQuery()
 			if !bridge.IsMaster() {
-				return nil			// Drop the query if it is the last one and we are not the master peer.
+				return nil			// Drop the query if it is the last one and we are the master peer.
 									// Indeed, we want to make sure the master peer misbehaves only when
 									// everything is ready to start the delivery phase.
 			}

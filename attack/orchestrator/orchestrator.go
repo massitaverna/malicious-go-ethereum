@@ -6,6 +6,7 @@ import "time"
 import "sync"
 import "bytes"
 import "encoding/binary"
+import mrand "math/rand"
 import "github.com/ethereum/go-ethereum/attack/buildchain"
 import "github.com/ethereum/go-ethereum/attack/msg"
 import "github.com/ethereum/go-ethereum/attack/utils"
@@ -38,6 +39,7 @@ type Orchestrator struct {
 	requiredOracleBits int
 	seed int32
 	done chan struct{}
+	rand *mrand.Rand
 
 }
 
@@ -247,6 +249,9 @@ func (o *Orchestrator) leadAttack() {
 	o.attackPhase = utils.SyncPhase
 	fmt.Println("Started", o.attackPhase, "phase")
 	// From here on, we develop the second phase of the attack
+	o.rand = mrand.New(mrand.NewSource(int64(o.seed)))
+	// For testing, print some numbers to see if we initialized it correctly:
+	fmt.Println(o.rand.Intn(100), 100+o.rand.Intn(100))
 
 	<-o.done 	// Wait for the attack to finish
 
@@ -379,26 +384,7 @@ func (o *Orchestrator) handleMessages() {
 				}()
 			case msg.OracleBit.Code:
 				o.oracleCh <- message.Content[0]
-			case msg.MustDisconnectVictim.Code:
-				go func() {
-					err := o.sendAllExcept(message, sender)
-					if err != nil {
-						o.errc <- err
-						o.close()
-						return
-					}
-				}()
-			/*
-			case msg.SolicitMustDisconnectVictim.Code:
-				go func() {
-					err := o.sendAllExcept(message, sender)
-					if err != nil {
-						o.errc <- err
-						o.close()
-						return
-					}
-				}()
-			*/
+
 			case msg.ServeLastFullBatch.Code:
 				go func() {
 					err := o.sendAllExcept(message, sender)
@@ -417,6 +403,15 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 				}()
+			case msg.Rollback.Code:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			case msg.TerminatingStateSync.Code:
 				go func() {
 					err := o.sendAllExcept(message, sender)
@@ -425,6 +420,18 @@ func (o *Orchestrator) handleMessages() {
 						o.close()
 						return
 					}
+				}()
+			case msg.InfoPRNG.Code:
+				steps_1 := int(binary.BigEndian.Uint32(message.Content[:4]))
+				steps_100 := int(binary.BigEndian.Uint32(message.Content[4:]))
+				go func() {
+					for i:=0; i < steps_100; i++ {
+						o.rand.Intn(100)
+					}
+					for i:=0; i < steps_1; i++ {
+						o.rand.Intn(1)
+					}
+					fmt.Println("PRNG synced with victim")
 				}()
 			}
 		}

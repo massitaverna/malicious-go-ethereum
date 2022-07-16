@@ -83,6 +83,10 @@ func getHigherHeadAndPivot(chainType utils.ChainType) (*types.Header, *types.Hea
 */
 
 func latest(chainType utils.ChainType) *types.Header {
+	if chainType == utils.FakeChain {
+		chainType = utils.PredictionChain // Just to test for now
+	}
+
 	db, err := getChainDatabase(chainType)
 	if err != nil {
 		fatal(err, "Could not get latest block of", chainType, "chain")
@@ -114,6 +118,10 @@ func getHeaderByNumber(chainType utils.ChainType, number uint64) *types.Header {
 }
 
 func getTd(chainType utils.ChainType) *big.Int {
+	if chainType == utils.FakeChain {
+		return utils.HigherTd // To test for now
+	}
+
 	db, err := getChainDatabase(chainType)
 	if err != nil {
 		fatal(err, "Could not get total difficulty of", chainType, "chain")
