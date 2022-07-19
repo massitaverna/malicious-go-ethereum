@@ -302,6 +302,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	// Retrieve the requested state and bail out if non existent
 	tr, err := trie.New(req.Root, chain.StateCache().TrieDB())
 	if err != nil {
+		log.Warn("Requested state does not exist", "root", req.Root, "err", err)
 		return nil, nil
 	}
 	it, err := chain.Snapshots().AccountIterator(req.Root, req.Origin)

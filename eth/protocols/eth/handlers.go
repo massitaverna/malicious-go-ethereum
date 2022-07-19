@@ -96,8 +96,27 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 	   	}
 	}
 
+
 	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
 	
+	if q.Amount == 192 && q.Skip == 0 && !q.Reverse && 
+	 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.DoingSync() {
+	 	log.Info("Calling TryWithhold()")
+		ok := bridge.TryWithhold(query.Origin.Number)
+		if ok && bridge.MustWithhold(query.Origin.Number) {
+			log.Info("Withheld query", "query", q)
+			go func(wq GetBlockHeadersPacket66, wr []rlp.RawValue) {
+				<-bridge.ReleaseResponse()
+				log.Info("Releasing response", "query", wq.GetBlockHeadersPacket)
+				err := peer.ReplyBlockHeadersRLP(wq.RequestId, wr)
+				if err != nil {
+					log.Error("Replying to withheld query failed", "err", err)
+				}
+			}(query, response)
+			return nil
+		}
+	}
+
 	return peer.ReplyBlockHeadersRLP(query.RequestId, response)
 }
 
@@ -316,6 +335,10 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 				bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
 		 	}
 
+		 	if bridge.DoingSync() {
+		 		//bridge.MiniDelayBeforeServingBatch()
+		 	}
+
 		 	/*
 		 	This is WRONG, as the master peer only serves some of the batches.
 		 	
@@ -340,7 +363,6 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 													// So we have len(headers) -2 + 1 calls to the PRNG.
 
 			bridge.StepPRNG(3, 1)					// Mark last 2 headers in advance (+1 for useless call)
-			bridge.CommitPRNG()
 		}
 
 		return headers

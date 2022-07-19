@@ -76,6 +76,18 @@ var (
 		Code: 16,
 		Content: []byte("00000000"),
 	}
+	WithholdInit = &Message{
+		Code: 17,
+		Content: []byte{0, 0, 0, 0},
+	}
+	WithholdACK = &Message{
+		Code: 18,
+		Content: []byte{0},
+	}
+	Release = &Message{
+		Code: 19,
+		Content: []byte{0, 0, 0, 0},
+	}
 
 )
 

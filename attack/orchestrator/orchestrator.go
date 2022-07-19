@@ -35,6 +35,7 @@ type Orchestrator struct {
 	mu sync.Mutex
 	syncOps int
 	syncCh chan struct{}
+	syncChRead bool
 	predictionOnly bool
 	requiredOracleBits int
 	seed int32
@@ -59,6 +60,7 @@ func New(errc chan error) *Orchestrator {
 		firstMasterSet: false,
 		syncOps: 0,
 		syncCh: make(chan struct{}),
+		syncChRead: false,
 		predictionOnly: false,
 		requiredOracleBits: utils.RequiredOracleBits,
 		seed: int32(-1),
@@ -217,6 +219,7 @@ func (o *Orchestrator) leadAttack() {
 				fmt.Println("Sleeping...")
 			}
 			o.sendAll(msg.LastOracleBit)
+
 			fmt.Println("Writing to o.syncCh")
 			o.syncCh <- struct{}{}
 			fmt.Println("Wrote to o.syncCh")
@@ -358,8 +361,9 @@ func (o *Orchestrator) handleMessages() {
 					return
 				}
 				go func() {
-					if o.syncOps == o.requiredOracleBits {
+					if o.syncOps == o.requiredOracleBits /*&& !o.syncChRead*/ {
 						<-o.syncCh
+						o.syncChRead = true
 					}
 					err := o.sendAllExcept(message, sender)
 					if err != nil {

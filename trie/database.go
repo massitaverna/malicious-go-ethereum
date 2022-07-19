@@ -33,7 +33,7 @@ import (
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/rlp"
 
-	"github.com/ethereum/go-ethereum/attack/bridge"
+	//"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 var (
@@ -508,10 +508,12 @@ func (db *Database) Dereference(root common.Hash) {
 		return
 	}
 
+	/*
 	if bridge.RootAtPivot() == root {
-		log.Info("Not dereferencing root node at pivot")
+		log.Warn("Not dereferencing root node at pivot")
 		return
 	}
+	*/
 
 	db.lock.Lock()
 	defer db.lock.Unlock()

