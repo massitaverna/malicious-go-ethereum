@@ -216,6 +216,10 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		genesisHeader.BaseFee = big.NewInt(params.InitialBaseFee)
 	}
 
+	if chainType == utils.FakeChain {
+		genesisHeader = originalHead.Header()
+	}
+
 	// Create Ethereum state
 	stateDir, err := tempDir(8)
 	if err != nil {

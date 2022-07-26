@@ -8,7 +8,8 @@ import "syscall"
 import "github.com/ethereum/go-ethereum/attack/orchestrator"
 
 func main() {
-	handleSigInt()
+	interruptCh := make(chan struct{})
+	handleSigInt(interruptCh)
 
 	rebuild := flag.Bool("rebuild", false, "Rebuild underlying chain(s) and overwrite them in buildchain tool's directory")
 	port    := flag.String("port", "45678", "Specify port to listen on")
@@ -27,23 +28,30 @@ func main() {
 											// However, at the end of the development, Wait() may not be needed
 											// any longer and could be removed from orchestrator.go
 
-	err := <-errc							// Wait for something to happen
-	if err != nil {
-		fmt.Println("Attack failed")
-		fmt.Println("Error:", err)
-	} else {
-		fmt.Println("Attack succeeded")
+	// Wait for something to happen
+	select {
+	case err := <-errc:						
+		if err != nil {
+			fmt.Println("Attack failed")
+			fmt.Println("Error:", err)
+		} else {
+			fmt.Println("Attack succeeded")
+		}
+	case <-interruptCh:
+		close(interruptCh)
+		orch.Close()
+		os.Exit(1)
 	}
 }
 
 
-func handleSigInt() {
+func handleSigInt(interruptCh chan struct{}) {
 	sigs := make(chan os.Signal)
 	signal.Notify(sigs, syscall.SIGINT)
 
 	go func() {
 		<-sigs
 		fmt.Println()
-		os.Exit(1)
+		interruptCh <- struct{}{}
 	}()
 }

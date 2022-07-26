@@ -211,13 +211,21 @@ func (n *Node) Start() error {
 	// Initialize attack bridge
 	id := n.server.Self().ID().String()[:8]
 	err = bridge.Initialize(id)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		<-bridge.GetQuitCh()
+		n.Close()
+	}()
 
 	// Warn about custom difficulty if used
 	if params.MinimumDifficulty.Uint64() < 131072 {
 		log.Warn("Using custom minimum difficulty", "min_diff", params.MinimumDifficulty.Uint64())
 	}
 	
-	return err
+	return nil
 }
 
 // Close stops the Node and releases resources acquired in

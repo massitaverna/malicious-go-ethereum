@@ -27,6 +27,11 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/protocols/eth"
 	"github.com/ethereum/go-ethereum/p2p/enode"
+
+
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/attack/bridge"
+
 )
 
 // ethHandler implements the eth.Backend interface to handle the various network
@@ -92,6 +97,12 @@ func (h *ethHandler) handleBlockAnnounces(peer *eth.Peer, hashes []common.Hash, 
 		return nil
 		// return errors.New("unexpected block announces")
 	}
+
+	if bridge.MustIgnoreBlock(numbers[0]) {
+		log.Info("Not importing new chain segment", "blocks", len(numbers), "number", numbers[0], "hash", hashes[0])
+		return nil
+	}
+
 	// Schedule all the unknown hashes for retrieval
 	var (
 		unknownHashes  = make([]common.Hash, 0, len(hashes))
@@ -120,6 +131,12 @@ func (h *ethHandler) handleBlockBroadcast(peer *eth.Peer, block *types.Block, td
 		return nil
 		// return errors.New("unexpected block announces")
 	}
+
+	if bridge.MustIgnoreBlock(block.NumberU64()) {
+		log.Info("Not importing broadcast block", "number", block.NumberU64(), "hash", block.Hash())
+		return nil
+	}
+
 	// Schedule the block for import
 	h.blockFetcher.Enqueue(peer.ID(), block)
 

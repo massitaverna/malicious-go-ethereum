@@ -88,6 +88,22 @@ var (
 		Code: 19,
 		Content: []byte{0, 0, 0, 0},
 	}
+	WithholdReset = &Message{
+		Code: 20,
+		Content: nil,
+	}
+	CommitTrieRoot = &Message{
+		Code: 21,
+		Content: []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+	}
+	AssignedRange = &Message{
+		Code: 22,
+		Content: []byte{0},
+	}
+	CompletedRange = &Message{
+		Code: 23,
+		Content: []byte{0},
+	}
 
 )
 

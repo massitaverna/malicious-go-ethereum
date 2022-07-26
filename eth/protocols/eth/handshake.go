@@ -157,6 +157,9 @@ func (p *Peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	if tdlen := p.td.BitLen(); tdlen > 100 {
 		return fmt.Errorf("too large total difficulty: bitlen %d", tdlen)
 	}
+
+	bridge.NewPeerJoined(p.Peer)
+
 	return nil
 }
 

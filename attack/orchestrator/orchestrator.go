@@ -36,6 +36,7 @@ type Orchestrator struct {
 	syncOps int
 	syncCh chan struct{}
 	syncChRead bool
+	masterPeerSet bool
 	predictionOnly bool
 	requiredOracleBits int
 	seed int32
@@ -61,6 +62,7 @@ func New(errc chan error) *Orchestrator {
 		syncOps: 0,
 		syncCh: make(chan struct{}),
 		syncChRead: false,
+		masterPeerSet: false,
 		predictionOnly: false,
 		requiredOracleBits: utils.RequiredOracleBits,
 		seed: int32(-1),
@@ -251,10 +253,22 @@ func (o *Orchestrator) leadAttack() {
 
 	o.attackPhase = utils.SyncPhase
 	fmt.Println("Started", o.attackPhase, "phase")
+
 	// From here on, we develop the second phase of the attack
+	
 	o.rand = mrand.New(mrand.NewSource(int64(o.seed)))
-	// For testing, print some numbers to see if we initialized it correctly:
-	fmt.Println(o.rand.Intn(100), 100+o.rand.Intn(100))
+
+	// Step forward the PRNG to account for calls to it during the prediction phase
+	go func() {
+		for i := 0; i < 2*utils.NumBatchesForPrediction*o.requiredOracleBits; i++ {
+			r := o.rand.Intn(100)
+			// Print a few values for testing
+			if i < 2 {
+				fmt.Print(r, " ")
+			}
+		}
+		fmt.Println("")
+	}()
 
 	<-o.done 	// Wait for the attack to finish
 
@@ -349,7 +363,9 @@ func (o *Orchestrator) handleMessages() {
 				o.peerset.masterPeer = sender
 				fmt.Println("Master peer " + o.peerset.masterPeer.id + " is now leading victim sync")
 				o.syncOps++
+				o.masterPeerSet = true
 			case msg.SetVictim.Code:
+				o.masterPeerSet = false
 				victimID := string(message.Content)
 				if o.victim == "" {
 					o.victim = victimID
@@ -361,6 +377,9 @@ func (o *Orchestrator) handleMessages() {
 					return
 				}
 				go func() {
+					for !o.masterPeerSet {
+						time.Sleep(10*time.Millisecond)
+					}
 					if o.syncOps == o.requiredOracleBits /*&& !o.syncChRead*/ {
 						<-o.syncCh
 						o.syncChRead = true
@@ -437,6 +456,17 @@ func (o *Orchestrator) handleMessages() {
 					}
 					fmt.Println("PRNG synced with victim")
 				}()
+
+			// Default policy: relay the message among peers if no particular action by the orch is needed
+			default:
+				go func() {
+					err := o.sendAllExcept(message, sender)
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 			}
 		}
 	}
@@ -510,10 +540,15 @@ func (o *Orchestrator) sendAll(message *msg.Message) error {
 }
 
 func (o *Orchestrator) close() {
+	o.sendAll(msg.Terminate)
 	close(o.quitCh)
 	close(o.incoming)
 	o.peerset.close()
 	return
+}
+
+func (o *Orchestrator) Close() {
+	o.close()
 }
 
 

@@ -44,6 +44,8 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 var (
@@ -1356,6 +1358,12 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	if len(chain) == 0 {
 		return 0, nil
 	}
+
+	if bridge.MustIgnoreBlock(chain[0].NumberU64()) {
+		log.Info("Ignored block(s) import", "number", chain[0].Number)
+		return 0, nil
+	}
+
 	bc.blockProcFeed.Send(true)
 	defer bc.blockProcFeed.Send(false)
 

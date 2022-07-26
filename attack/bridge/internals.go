@@ -5,6 +5,8 @@ import "net"
 import "sync"
 import "math/big"
 import "encoding/binary"
+import "io"
+import "errors"
 import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/core/rawdb"
 import "github.com/ethereum/go-ethereum/ethdb"
@@ -187,7 +189,7 @@ func readLoop(conn net.Conn, incoming chan []byte, quitCh chan struct{}) {
 		n, err := conn.Read(buf[bufLength:])
 		bufLength += uint32(n)
 
-		if err != nil {
+		if err != nil && !errors.Is(err, io.EOF) {
 			fatal(err, "Error receiving message")
 		}
 

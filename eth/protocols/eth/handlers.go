@@ -19,6 +19,7 @@ package eth
 import (
 	"encoding/json"
 	"fmt"
+	//"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -99,14 +100,21 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 
 	response := ServiceGetBlockHeadersQuery(chain, query.GetBlockHeadersPacket, peer)
 	
+	/*
 	if q.Amount == 192 && q.Skip == 0 && !q.Reverse && 
 	 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.DoingSync() {
 	 	log.Info("Calling TryWithhold()")
 		ok := bridge.TryWithhold(query.Origin.Number)
-		if ok && bridge.MustWithhold(query.Origin.Number) {
+		if false && ok && bridge.MustWithhold(query.Origin.Number) {
 			log.Info("Withheld query", "query", q)
 			go func(wq GetBlockHeadersPacket66, wr []rlp.RawValue) {
-				<-bridge.ReleaseResponse()
+				timeout := time.NewTimer(5*time.Second)
+				select {
+					case <-bridge.ReleaseResponse():
+						bridge.MiniDelayBeforeServingBatch()
+					case <-timeout.C:
+						bridge.ProcessStepsAtSkeletonEnd(wq.GetBlockHeadersPacket.Origin.Number)
+				}
 				log.Info("Releasing response", "query", wq.GetBlockHeadersPacket)
 				err := peer.ReplyBlockHeadersRLP(wq.RequestId, wr)
 				if err != nil {
@@ -116,6 +124,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 			return nil
 		}
 	}
+	*/
 
 	return peer.ReplyBlockHeadersRLP(query.RequestId, response)
 }
@@ -139,7 +148,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	queryForMaster := false
 	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Amount == 2 && query.Skip == 63 && query.Reverse {
 		//bridge.SetMasterPeer()
-		bridge.SetVictimIfNone(peer.Peer)
+		bridge.SetVictimIfNone(peer.Peer, peer.td)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
 		}
@@ -192,6 +201,8 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		lookups int
 
 		headForMasterQuery uint64
+		pivotNumber uint64
+
 	)
 	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
 		len(headers) < maxHeadersServe && lookups < 2*maxHeadersServe {
@@ -219,6 +230,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			break
 		}
 
+		if pivoting && len(headers) == 0 {
+			pivotNumber = origin.Number.Uint64()
+		}
+
 		if bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			log.Info("Limiting query results", "fixedHead", bridge.FixedHead(), "origin", query.Origin.Number)
 			break
@@ -232,7 +247,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 
 		if len(headers) == 2 && pivoting {
-			bridge.SetPivot(query.Origin.Number)
+			bridge.SetPivot(pivotNumber)
 		}
 
 		// Advance to the next header of the query
@@ -289,7 +304,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if pivoting {
 		bridge.PivotingServed()
 	}
-	if skeleton {
+	if skeleton && bridge.DoingSync() {
 		bridge.StepPRNG(2*len(headers), 100)
 	}
 	return headers
@@ -352,7 +367,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Note that the last partial batch cannot be 192 blocks in sync phase. Indeed, if it was 192 blocks,
 		// as the head is fixed, it would be included in the skeleton, and therefore it would not be the last
 		// partial batch. This would then have length 0.
-		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {	
+		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.ProvidedSkeleton() {	
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
 
