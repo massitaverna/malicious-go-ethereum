@@ -203,6 +203,43 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		return nil, err
 	}
 	bridge.SetTrueChain(chainDb, eth.blockchain.GetStateCache())
+	go func() {
+		for !bridge.IsInitialized() {
+			time.Sleep(1*time.Second)
+		}
+		log.Info("Started goroutine for importing fake batches")
+
+		toImport := make([]types.Blocks, 0)
+		for {
+			select {
+			case <-bridge.GetQuitCh():
+				log.Info("Stopping goroutine for importing fake batches")
+				return
+			case blocks := <-bridge.FakeBatchesToImport():
+				if blocks != nil {
+					toImport = append(toImport, blocks)
+				// Use nil a sentinel value to notify that all fake batches have been received
+				} else {
+					for _, blocks := range toImport {
+						first := blocks[0].NumberU64()
+						last := blocks[len(blocks)-1].NumberU64()
+						log.Info("About to import fake batch", "first", first, "last", last)
+						n, err := eth.blockchain.InsertChainBypassVerifications(blocks)
+						if err != nil {
+							log.Error("Importing fake batch failed", "first", first, "last", last, "num", n, "err", err)
+						} else if n != len(blocks) {
+							log.Error("Fake batch imported partially", "first", first, "last", last,
+									  "size", len(blocks), "imported", n)
+						} else {
+							log.Info("Imported blocks bypassing verifications", "first", first, "last", last)
+						}
+					}
+					bridge.AllFakeBatchesImported()
+					return
+				}
+			}
+		}
+	}()
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)

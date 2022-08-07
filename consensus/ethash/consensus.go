@@ -182,7 +182,70 @@ func (ethash *Ethash) VerifyHeaders(chain consensus.ChainHeaderReader, headers [
 	return abort, errorsOut
 }
 
-func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int, unixNow int64) error {
+func (ethash *Ethash) VerifyHeadersNoFutureCheck(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
+	// If we're running a full engine faking, accept any input as valid
+	if ethash.config.PowMode == ModeFullFake || len(headers) == 0 {
+		abort, results := make(chan struct{}), make(chan error, len(headers))
+		for i := 0; i < len(headers); i++ {
+			results <- nil
+		}
+		return abort, results
+	}
+
+	// Spawn as many workers as allowed threads
+	workers := runtime.GOMAXPROCS(0)
+	if len(headers) < workers {
+		workers = len(headers)
+	}
+
+	// Create a task channel and spawn the verifiers
+	var (
+		inputs  = make(chan int)
+		done    = make(chan int, workers)
+		errors  = make([]error, len(headers))
+		abort   = make(chan struct{})
+		unixNow = time.Now().Unix()
+	)
+	for i := 0; i < workers; i++ {
+		go func() {
+			for index := range inputs {
+				errors[index] = ethash.verifyHeaderWorker(chain, headers, seals, index, unixNow, true)
+				done <- index
+			}
+		}()
+	}
+
+	errorsOut := make(chan error, len(headers))
+	go func() {
+		defer close(inputs)
+		var (
+			in, out = 0, 0
+			checked = make([]bool, len(headers))
+			inputs  = inputs
+		)
+		for {
+			select {
+			case inputs <- in:
+				if in++; in == len(headers) {
+					// Reached end of headers. Stop sending to workers.
+					inputs = nil
+				}
+			case index := <-done:
+				for checked[index] = true; checked[out]; out++ {
+					errorsOut <- errors[out]
+					if out == len(headers)-1 {
+						return
+					}
+				}
+			case <-abort:
+				return
+			}
+		}
+	}()
+	return abort, errorsOut
+}
+
+func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, headers []*types.Header, seals []bool, index int, unixNow int64, noFutureCheck ...bool) error {
 	var parent *types.Header
 	if index == 0 {
 		parent = chain.GetHeader(headers[0].ParentHash, headers[0].Number.Uint64()-1)
@@ -192,7 +255,7 @@ func (ethash *Ethash) verifyHeaderWorker(chain consensus.ChainHeaderReader, head
 	if parent == nil {
 		return consensus.ErrUnknownAncestor
 	}
-	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index], unixNow)
+	return ethash.verifyHeader(chain, headers[index], parent, false, seals[index], unixNow, noFutureCheck...)
 }
 
 // VerifyUncles verifies that the given block's uncles conform to the consensus
@@ -261,13 +324,13 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 // verifyHeader checks whether a header conforms to the consensus rules of the
 // stock Ethereum ethash engine.
 // See YP section 4.3.4. "Block Header Validity"
-func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool, unixNow int64) error {
+func (ethash *Ethash) verifyHeader(chain consensus.ChainHeaderReader, header, parent *types.Header, uncle bool, seal bool, unixNow int64, noFutureCheck ...bool) error {
 	// Ensure that the header's extra-data section is of a reasonable size
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data too long: %d > %d", len(header.Extra), params.MaximumExtraDataSize)
 	}
 	// Verify the header's timestamp
-	if !uncle {
+	if !uncle && (noFutureCheck==nil || !noFutureCheck[0]) {
 		if header.Time > uint64(unixNow+allowedFutureBlockTimeSeconds) {
 			return consensus.ErrFutureBlock
 		}

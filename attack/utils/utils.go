@@ -23,12 +23,15 @@ const (
 	DeliveryPhase = AttackPhase(4)
 
 	BatchSize = 192
+	MinFullyVerifiedBlocks = 88
 	NumBatchesForPrediction = 8		// Corresponds to m+1, with m parameter in Section 13 of the Write-Up
 									// We need m+1 to be even if the malicious peers are 2
 
 	RequiredOracleBits = 14			// Corresponds to parameter n in Section 13 of the Write-Up.
 									// Now set to 14 for testing purposes, otherwise >=31
 	SeedSize = 4					// The seed is always 4 bytes long
+
+	ReadBufferSize = 32*1024*1024
 )
 
 var (
@@ -46,7 +49,7 @@ var (
 	Tb = 2	// Average time to mine a new block
 	
 	HigherTd = new(big.Int).Mul(big.NewInt(1_000_000_000_000), big.NewInt(1_000_000_000_000)) // 10^24
-	headersDownloadTime = 8*60
+	headersDownloadTime = 15*60
 	DifficultySupplement = new(big.Int).Mul(D0, big.NewInt(int64(30*headersDownloadTime/(Tb*100))))
 																// This corresponds to the TD of 75% (30% for testing) of the number of
 																// new blocks mined during the headers download.

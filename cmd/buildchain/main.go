@@ -20,12 +20,17 @@ func main() {
 	export    := flag.String("export", "not set", "If set, export the chain to the specified file in RLP-encoded form. Useful for imports with 'geth import'")
 	debug     := flag.Bool("debug", false, "Enable debug logs")
 	numAccounts := flag.Int("accounts", 0, "Number of accounts to generate (for true chain)")
+	real := flag.Bool("real-mode", false, "Run the attack on the real Ethereum world, instead of the simulated one")
 
 	flag.Parse()
 	chaintype, err := utils.StringToChainType(*typeName)
 	if err != nil {
 		fmt.Println("Invalid chain type: " + *typeName)
 		return
+	}
+
+	if *real {
+		buildchain.SetRealMode()
 	}
 
 	if !isFlagPassed("type") {
@@ -39,7 +44,7 @@ func main() {
 	}
 
 	if isFlagPassed("n") {
-		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *numAccounts, *debug)
+		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *numAccounts, *debug, nil)
 		if err != nil {
 			fmt.Println("Could not build the chain")
 			fmt.Println("err =", err)

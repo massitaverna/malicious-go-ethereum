@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/big"
 	"os"
+	"time"
 	"encoding/binary"
 	"math/rand"
 	"crypto/ecdsa"
@@ -21,7 +22,10 @@ import (
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/ethdb"
 	ethdbLeveldb "github.com/ethereum/go-ethereum/ethdb/leveldb"
+	//dircopy "github.com/otiai10/copy"
+
 	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
@@ -32,6 +36,10 @@ var vmcfg = vm.Config{EnablePreimageRecording: false}
 var privkey *ecdsa.PrivateKey
 var pubkey ecdsa.PublicKey
 var coinbase common.Address
+var simulation = true
+var sealsMap map[int]bool
+var timestampDeltasMap map[int]int
+
 
 func initCoinbase() error {
 	var err error
@@ -64,7 +72,16 @@ func setEthashDatasetDir() error {
 	return nil
 }
 
-func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts int, debug bool) error {
+func makeMaps() {
+	sealsMap = make(map[int]bool)
+	timestampDeltasMap = make(map[int]int)
+}
+
+func SetRealMode() {
+	simulation = false
+}
+
+func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts int, debug bool, buildResults chan types.Blocks) error {
 	// Create/open database
 	if err := setChainDbPath(chainType); err != nil {
 		return err
@@ -76,40 +93,58 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			return err
 		}
 	}
-	db, err := leveldb.OpenFile(chainDbPath, &opt.Options{ErrorIfExist: true})
-	if err == os.ErrExist {
-		dbId, errf := loadId(dbIdPath)
-		if errf != nil {
-			fmt.Println("Could not load database ID of an already existing database")
-			return errf
+
+	var chainDb ethdb.Database
+	var err error
+	// For the fake chain, the database directory is already set up by the orchestrator
+	if chainType != utils.FakeChain {
+		db, err := leveldb.OpenFile(chainDbPath, &opt.Options{ErrorIfExist: true})
+		if err == os.ErrExist {
+			dbId, errf := loadId(dbIdPath)
+			if errf != nil {
+				fmt.Println("Could not load database ID of an already existing database")
+				return errf
+			}
+			if dbId == computeId(length) {
+				fmt.Println("The chain is already built and ready to use")
+				return nil
+			} else {
+				fmt.Println("Another chain is stored at " + chainDbPath)
+				fmt.Println("To override it, run your command with the flag --overwrite")
+				return os.ErrExist
+			}
 		}
-		if dbId == computeId(length) {
-			fmt.Println("The chain is already built and ready to use")
-			return nil
-		} else {
-			fmt.Println("Another chain is stored at " + chainDbPath)
-			fmt.Println("To override it, run your command with the flag --overwrite")
-			return os.ErrExist
+		if err != nil {
+			fmt.Println("An error happened opening the database")
+			return err
 		}
-	}
-	if err != nil {
-		fmt.Println("An error happened opening the database")
-		return err
+
+		err = storeId(dbIdPath, computeId(length))
+		if err != nil {
+			fmt.Println("Could not store ID of newly created database")
+			return err
+		}
+
+		db.Close()
+
+		chainDb, err = rawdb.NewLevelDBDatabase(chainDbPath, 0, 0, "", false)
+	} else {
+		freezer := chainDbPath + string(os.PathSeparator) + "ancient"
+		chainDb, err = rawdb.NewLevelDBDatabaseWithFreezer(chainDbPath, 0, 0, freezer, "", false)
 	}
 
-	err = storeId(dbIdPath, computeId(length))
-	if err != nil {
-		fmt.Println("Could not store ID of newly created database")
-		return err
-	}
-
-	db.Close()
-
-	chainDb, err := rawdb.NewLevelDBDatabase(chainDbPath, 0, 0, "", false)
 	if err != nil {
 		fmt.Println("Could not open rawdb database at", chainDbPath)
 		return err
 	}
+
+	//TODO: REMOVE
+	/*
+	hnumber := uint64(490882)
+	hhash := rawdb.ReadCanonicalHash(chainDb, hnumber)
+	fmt.Println("Hash", hhash)
+	originalHead = rawdb.ReadHeader(chainDb, hhash, hnumber)
+	*/
 
 	success := false
 	defer func() {
@@ -187,11 +222,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	}
 
 	chainConfig := params.MainnetChainConfig
-
-	// For now, we use this in every case. Later on, we will load the right config from file.
-	if true || chainType != utils.PredictionChain {			// Both the true chain and the fake segment need to be at
-													// the last Ethereum fork, in order for the simulation to
-													// be as real as possible.
+	if simulation {
 		chainConfig = &params.ChainConfig{
 			ChainID:             big.NewInt(1),
 			HomesteadBlock:      big.NewInt(0),
@@ -216,47 +247,113 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		genesisHeader.BaseFee = big.NewInt(params.InitialBaseFee)
 	}
 
+	/*
 	if chainType == utils.FakeChain {
-		genesisHeader = originalHead.Header()
+		genesisHeader = types.CopyHeader(originalHead)
 	}
+	*/
 
-	// Create Ethereum state
-	stateDir, err := tempDir(8)
-	if err != nil {
-		return err
+	// Create/open Ethereum state
+	var ethState *state.StateDB
+	if chainType != utils.FakeChain {
+		stateDir, err := tempDir(8)
+		if err != nil {
+			return err
+		}
+
+		/*
+		defer func() {
+			//TODO: delete stateDir from /tmp
+		}()
+		*/
+		stateLeveldb, err := leveldb.OpenFile(stateDir, nil)
+		if err != nil {
+			fmt.Println("Could not create/open state database")
+			return err
+		}
+		stateLeveldbWrapper := rawdb.NewDatabase(ethdbLeveldb.NewSimple(stateLeveldb))
+		stateDb := state.NewDatabase(stateLeveldbWrapper)
+		ethState, err = state.New(genesisHeader.Root, stateDb, nil)
+	} else {
+		stateDb := state.NewDatabase(chainDb)
+		ethState, err = state.New(originalHead.Root, stateDb, nil)
 	}
-	stateLeveldb, err := leveldb.OpenFile(stateDir, nil)
-	if err != nil {
-		fmt.Println("Could not create a state database")
-		return err
-	}
-	stateLeveldbWrapper := rawdb.NewDatabase(ethdbLeveldb.NewSimple(stateLeveldb))
-	stateDb := state.NewDatabase(stateLeveldbWrapper)
-	ethState, err := state.New(genesisHeader.Root, stateDb, nil)
 	if err != nil {
 		fmt.Println("Could not create an Ethereum state")
 		return err
 	}
 
 	//headers := []*types.Header{genesisHeader}
-	lastHeader := genesisHeader
-	td := new(big.Int).Set(genesisHeader.Difficulty)
 
-	genesisBlock := types.NewBlockWithHeader(genesisHeader)
-	rawdb.WriteTd(chainDb, genesisBlock.Hash(), genesisBlock.NumberU64(), td)
-	rawdb.WriteBlock(chainDb, genesisBlock)
-	rawdb.WriteCanonicalHash(chainDb, genesisHeader.Hash(), genesisHeader.Number.Uint64())
-	rawdb.WriteHeadBlockHash(chainDb, genesisHeader.Hash())
+	var lastHeader *types.Header
+	var td *big.Int
+	if chainType == utils.FakeChain {
+		lastHeader = types.CopyHeader(originalHead)
+		td = rawdb.ReadTd(chainDb, lastHeader.Hash(), lastHeader.Number.Uint64())
+	} else {
+		lastHeader = genesisHeader
+		td = new(big.Int).Set(genesisHeader.Difficulty)
+	}
+	if chainType != utils.FakeChain {
+		genesisBlock := types.NewBlockWithHeader(genesisHeader)
+		rawdb.WriteTd(chainDb, genesisBlock.Hash(), genesisBlock.NumberU64(), td)
+		rawdb.WriteBlock(chainDb, genesisBlock)
+		rawdb.WriteCanonicalHash(chainDb, genesisHeader.Hash(), genesisHeader.Number.Uint64())
+		rawdb.WriteHeadBlockHash(chainDb, genesisHeader.Hash())
+	}
 
-	blockchain, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmcfg, nil, nil)
+
+	var cacheConfig = &core.CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		SnapshotLimit:  0,
+		SnapshotWait:   true,
+	}
+	blockchain, err := core.NewBlockChain(chainDb, cacheConfig, chainConfig, engine, vmcfg, nil, nil)
 	if err != nil {
 		fmt.Println("Could not create a blockchain object")
 		return err
 	}
 
+	//TODO: REMOVE true ||
+	if /*true ||*/ chainType != utils.FakeChain {
+		makeMaps()
+	}
+	switch (chainType) {
+	case utils.PredictionChain:
+		startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
+		for i := 1; i <= length; i++ {
+			sealsMap[i] = !(startOfLastBatch < i && i <= startOfLastBatch + 50)
+			timestampDeltasMap[i] = 13
+		}
+	case utils.TrueChain:
+		for i := 1; i <= length; i++ {
+			sealsMap[i] = true
+			timestampDeltasMap[i] = 13
+		}
+	//TODO: REMOVE
+	/*
+	case utils.FakeChain:
+		for i := 1; i <= length; i++ {
+			sealsMap[i+490882] = true
+			timestampDeltasMap[i+490882] = 13
+		}
+	*/
+	}
+
 	numDone := 1 // Genesis block is already done
+	bigOne := big.NewInt(1)
+	offset := 0
+	if chainType == utils.FakeChain {
+		offset = int(originalHead.Number.Uint64())
+	}
+	resultsCache := make(types.Blocks, 0)
 
 	for i := 1; i <= length; i++ {
+		if _, tExists := timestampDeltasMap[i+offset]; !tExists {
+			return fmt.Errorf("Timestamp delta value for block number %d does not exist", i+offset)
+		}
 		currHeader := &types.Header{
 			ParentHash: lastHeader.Hash(),
 			UncleHash: common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347"),
@@ -265,11 +362,11 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			TxHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 			Bloom: types.BytesToBloom(common.FromHex("0x0")),
-			Difficulty: ethash.CalcDifficulty(chainConfig, lastHeader.Time + uint64(13), lastHeader),
-			Number: big.NewInt(0).Add(lastHeader.Number, big.NewInt(1)),
-			GasLimit: genesisHeader.GasLimit,
+			Difficulty: ethash.CalcDifficulty(chainConfig, lastHeader.Time + uint64(timestampDeltasMap[i+offset]), lastHeader),
+			Number: big.NewInt(0).Add(lastHeader.Number, bigOne),
+			GasLimit: lastHeader.GasLimit,
 			GasUsed: uint64(0),
-			Time: lastHeader.Time + uint64(13),
+			Time: lastHeader.Time + uint64(timestampDeltasMap[i+offset]),
 			Extra: params.DAOForkBlockExtra,
 			//BaseFee: misc.CalcBaseFee(chainConfig, lastHeader),
 		}
@@ -279,6 +376,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		}
 		td.Add(td, currHeader.Difficulty)
 
+		//fmt.Printf("Start mining %d-th block at difficulty %d\n", i, currHeader.Difficulty.Uint64())
 		var block *types.Block
 
 		// Use the first onlyRewardsBlocks blocks to just generate block rewards,
@@ -309,13 +407,16 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			resetGasPool()
 		}
 		if err != nil {
-			fmt.Println("Could not finalize block", i)
+			fmt.Println("Could not finalize block", i+offset)
 			return err
 		}
 		// Seal the block if we are not building the prediction chain or
 		// we are not in the first 50 blocks of the last full batch
-		startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
-		if chainType!=utils.PredictionChain || !(startOfLastBatch < i && i <= startOfLastBatch + 50) {
+		//startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
+		//if chainType!=utils.PredictionChain || !(startOfLastBatch < i && i <= startOfLastBatch + 50) {
+		if toSeal, exists := sealsMap[i+offset]; !exists {
+			return fmt.Errorf("Seal value for block number %d does not exist", i+offset)
+		} else if toSeal {
 			results := make(chan *types.Block, 1)
 			stop := make(chan struct{})
 			err = engine.Seal(nil, block, results, stop)
@@ -339,6 +440,16 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		rawdb.WriteBlock(chainDb, block)
 		rawdb.WriteCanonicalHash(chainDb, lastHeader.Hash(), lastHeader.Number.Uint64())
 
+		if buildResults != nil {
+			resultsCache = append(resultsCache, block)
+			if len(resultsCache) == utils.BatchSize {
+				rc := make(types.Blocks, len(resultsCache))
+				copy(rc, resultsCache)
+				buildResults <- rc
+				resultsCache = make(types.Blocks, 0)
+			}
+		}
+
 
 		//Print progress statistics
 		numDone++
@@ -348,6 +459,10 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	}
 	rawdb.WriteHeadHeaderHash(chainDb, lastHeader.Hash())
 	rawdb.WriteHeadBlockHash(chainDb, lastHeader.Hash())
+
+	if buildResults != nil && len(resultsCache) != 0 {
+		buildResults <- resultsCache
+	}
 
 	// Explicit Write() shouldn't be necessary now as chainDb.Close() already flushes to disk.
 	/*
@@ -361,6 +476,27 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	*/
 
 	success = true
+	return nil
+}
+
+func PrebuildDAG(blockNum uint64) error {
+	if err := setEthashDatasetDir(); err != nil {
+		fmt.Println("Couldn't prebuild DAG for block", blockNum)
+		return err
+	}
+
+	ethashConfig := ethash.Config{
+		DatasetDir:       ethashDatasetDir,
+		CacheDir:         "ethash",
+		CachesInMem:      2,
+		CachesOnDisk:     3,
+		CachesLockMmap:   false,
+		DatasetsInMem:    1,
+		DatasetsOnDisk:   3,		// Number of DAGs (one per epoch) to store on disk
+		DatasetsLockMmap: false,
+	}
+	engine := ethash.New(ethashConfig, nil, true)
+	engine.Dataset(blockNum, false)
 	return nil
 }
 

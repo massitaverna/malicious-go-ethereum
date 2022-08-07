@@ -18,6 +18,12 @@ var databases map[utils.ChainType]ethdb.Database
 var dbLock sync.Mutex
 
 func getChainDatabase(chainType utils.ChainType) (ethdb.Database, error) {
+	// As we import the fake chain into geth as the canonical chain, we need to access the true chain
+	// to serve the fake one.
+	if chainType == utils.FakeChain {
+		return getChainDatabase(utils.TrueChain)
+	}
+
 	dbLock.Lock()
 	defer dbLock.Unlock()
 
@@ -27,6 +33,7 @@ func getChainDatabase(chainType utils.ChainType) (ethdb.Database, error) {
 	if databases[chainType] != nil {
 		return databases[chainType], nil
 	}
+
 
 	if chainType == utils.TrueChain {
 		log("True chain database requested before initializing it")
@@ -85,10 +92,6 @@ func getHigherHeadAndPivot(chainType utils.ChainType) (*types.Header, *types.Hea
 */
 
 func latest(chainType utils.ChainType) *types.Header {
-	if chainType == utils.FakeChain {
-		chainType = utils.PredictionChain // Just to test for now
-	}
-
 	db, err := getChainDatabase(chainType)
 	if err != nil {
 		fatal(err, "Could not get latest block of", chainType, "chain")
@@ -120,10 +123,6 @@ func getHeaderByNumber(chainType utils.ChainType, number uint64) *types.Header {
 }
 
 func getTd(chainType utils.ChainType) *big.Int {
-	if chainType == utils.FakeChain {
-		return utils.HigherTd // To test for now
-	}
-
 	db, err := getChainDatabase(chainType)
 	if err != nil {
 		fatal(err, "Could not get total difficulty of", chainType, "chain")
@@ -176,7 +175,7 @@ func createMgethDirIfMissing() error {
 
 func readLoop(conn net.Conn, incoming chan []byte, quitCh chan struct{}) {
 	bufLength := uint32(0)
-	buf := make([]byte, 1024)
+	buf := make([]byte, utils.ReadBufferSize)
 
 	for {
 		select {
@@ -200,7 +199,7 @@ func readLoop(conn net.Conn, incoming chan []byte, quitCh chan struct{}) {
 			}
 			msg := buf[:4+msgLength]
 			//buf = buf[4+msgLength:]
-			temp := make([]byte, 1024)
+			temp := make([]byte, utils.ReadBufferSize)
 			copy(temp, buf[4+msgLength:])
 			buf = temp
 			bufLength -= 4 + msgLength

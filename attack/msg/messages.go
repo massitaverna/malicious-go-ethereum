@@ -104,10 +104,44 @@ var (
 		Code: 23,
 		Content: []byte{0},
 	}
-
+	ResetRangeInfo = &Message{
+		Code: 24,
+		Content: []byte{0},
+	}
+	LastRangeQuery = &Message{
+		Code: 25,
+		Content: []byte{0},
+	}
+	LastRangeQueryACK = &Message{
+		Code: 26,
+		Content: []byte{0},
+	}
+	OriginalHead = &Message{
+		Code: 27,
+		Content: []byte{0},
+	}
+	GetCwd = &Message{
+		Code: 28,
+		Content: nil,
+	}
+	Cwd = &Message{
+		Code: 29,
+		Content: []byte{0},
+	}
+	FakeBatch = &Message{
+		Code: 30,
+		Content: []byte{0},
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {
+	if c == nil {
+		return &Message{
+			Code: m.Code,
+			Content: nil,
+		}
+	}
+
 	contentCopy := make([]byte, len(c))
 	copy(contentCopy, c)
 	return &Message{
@@ -128,10 +162,13 @@ func (m *Message) Encode() []byte {
 func Decode(messageAsBytes []byte) *Message {
 	length := binary.BigEndian.Uint32(messageAsBytes[:4])
 	code := messageAsBytes[4]
-	content := make([]byte, length-1)
-	copy(content, messageAsBytes[5:])
-	if len(content) != int(length) - 1 {
-		return nil
+	var content []byte
+	if int(length) - 1 != 0 {
+		content = make([]byte, length-1)
+		copy(content, messageAsBytes[5:])
+		if len(content) != int(length) - 1 {
+			return nil
+		}
 	}
 	return &Message{
 		Code: code,

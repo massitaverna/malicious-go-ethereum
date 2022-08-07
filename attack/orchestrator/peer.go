@@ -7,7 +7,7 @@ import "net"
 import "errors"
 import "encoding/binary"
 import "github.com/ethereum/go-ethereum/attack/msg"
-//import "github.com/ethereum/go-ethereum/attack/utils"
+import "github.com/ethereum/go-ethereum/attack/utils"
 
 type Peer struct {
 	id string
@@ -63,7 +63,7 @@ type peerMessage struct {
 
 func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc chan error) {
 	bufLength := uint32(0)
-	buf := make([]byte, 1024)
+	buf := make([]byte, utils.ReadBufferSize)
 
 	for {
 		select {
@@ -91,7 +91,7 @@ func (p *Peer) readLoop(incoming chan *peerMessage, quitCh chan struct{}, errc c
 				break
 			}
 			messageAsBytes := buf[:4+msgLength]
-			temp := make([]byte, 1024)
+			temp := make([]byte, utils.ReadBufferSize)
 			copy(temp, buf[4+msgLength:])
 			buf = temp
 			bufLength -= 4 + msgLength
