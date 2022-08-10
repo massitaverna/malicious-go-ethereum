@@ -463,6 +463,11 @@ func (d *dialScheduler) startDial(task *dialTask) {
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[task.dest.ID()] = task
 	go func() {
+		for NoNewConnections == nil {
+			time.Sleep(100*time.Millisecond)
+		}
+		time.Sleep(100*time.Millisecond)
+
 		task.run(d)
 		d.doneCh <- task
 	}()
