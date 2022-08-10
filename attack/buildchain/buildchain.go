@@ -240,7 +240,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			BerlinBlock:         big.NewInt(0),
 			LondonBlock:         big.NewInt(0),
 			ArrowGlacierBlock:   big.NewInt(0),
-			//GrayGlacierBlock:    big.NewInt(0),
+			GrayGlacierBlock:    big.NewInt(0),
 			Ethash:              new(params.EthashConfig),
 		}
 
