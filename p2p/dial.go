@@ -410,7 +410,7 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 		return errRecentlyDialed
 	}
 
-	if *NoNewConnections {
+	if NoNewConnections != nil && *NoNewConnections {
 		log.Info("Avoiding p2p node", "id", n.ID().String()[:8])
 		return errors.New("no new connections now")
 	}
