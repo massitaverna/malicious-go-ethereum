@@ -675,7 +675,8 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 					fmt.Printf("Pre-built DAG at block #%d\n", height)
-
+				}()
+				go func() {
 					separator := string(os.PathSeparator)
 					srcPath := mgethDir + separator + "datadir" + separator + "geth" + separator + "chaindata"
 					home, err := os.UserHomeDir()
