@@ -132,6 +132,15 @@ func getTd(chainType utils.ChainType) *big.Int {
 	return rawdb.ReadTd(db, hash, *number)
 }
 
+func getTdByNumber(chainType utils.ChainType, number uint64) *big.Int {
+	db, err := getChainDatabase(chainType)
+	if err != nil {
+		fatal(err, "Could not get TD of block", number, "in", chainType, "chain")
+	}
+	hash := rawdb.ReadCanonicalHash(db, number)
+	return rawdb.ReadTd(db, hash, number)
+}
+
 /*
 func getBlockChain(chainType utils.ChainType) {
 	chainDb := databases[chainType]

@@ -132,6 +132,10 @@ var (
 		Code: 30,
 		Content: []byte{0},
 	}
+	GhostRoot = &Message{
+		Code: 31,
+		Content: []byte{0},
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {

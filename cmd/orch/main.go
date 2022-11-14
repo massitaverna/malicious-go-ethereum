@@ -19,6 +19,7 @@ func main() {
 	mode := flag.String("mode", "simulation", "Run the attack either on the real or simulated Ethereum world (values: \"real\" or \"simulation\"")
 	Tm := flag.Int("time", -1, "Time for mining the fake segment")
 	fraction := flag.Float64("fraction", 0, "Fraction of the total network mining power controlled by the adversary")
+	ghostAttack := flag.Bool("ghost", false, "Runs a SNaP-Ghost attack insead of a standard SNaP attack")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
@@ -33,6 +34,7 @@ func main() {
 		AtkMode: *mode,
 		Tm: *Tm,
 		Fraction: *fraction,
+		GhostAttack: *ghostAttack,
 	}
 	orch.Start(cfg)
 	//orch.Wait()							// Calling Wait() would cause a deadlock if errc was not buffered,

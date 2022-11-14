@@ -54,6 +54,7 @@ type Orchestrator struct {
 	prngTuned chan struct{}
 	Tm int
 	fraction float64
+	ghostAttack bool
 }
 
 type OrchConfig struct {
@@ -65,6 +66,7 @@ type OrchConfig struct {
 	AtkMode string
 	Tm int
 	Fraction float64
+	GhostAttack bool
 }
 
 func New(errc chan error) *Orchestrator {
@@ -101,7 +103,7 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 	go o.addPeers(cfg.Port)
 	go func() {
 		predictionChainLength := utils.NumBatchesForPrediction*utils.BatchSize + 88
-		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, cfg.Rebuild, 0, false, nil)
+		err := buildchain.BuildChain(utils.PredictionChain, predictionChainLength, cfg.Rebuild, 0, false, false, nil)
 		if err != nil {
 			o.errc <- err
 			o.close()
@@ -134,6 +136,8 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 
 	o.Tm = cfg.Tm
 	o.fraction = cfg.Fraction
+
+	o.ghostAttack = cfg.GhostAttack
 
 	fmt.Println("Orchestrator started")
 }
@@ -380,8 +384,14 @@ func (o *Orchestrator) leadAttack() {
 	errc := make(chan error)
 	results := make(chan types.Blocks)
 	go func() {
+		if o.ghostAttack {
+			for !buildchain.GhostRootSet() {
+				time.Sleep(100*time.Millisecond)
+			}
+			fmt.Println("Ghost root set")
+		}
 		errc <- buildchain.BuildChain(utils.FakeChain, bp.NumBatches*utils.BatchSize + utils.MinFullyVerifiedBlocks,
-									  false, 0, false, results) 
+									  false, 0, o.ghostAttack, false, results) 
 	}()
 
 	loop:
@@ -706,6 +716,8 @@ func (o *Orchestrator) handleMessages() {
 			case msg.Cwd.Code:
 				mgethDir = string(message.Content)
 				buildchain.SetMgethDir(mgethDir)
+			case msg.GhostRoot.Code:
+				buildchain.SetGhostRoot(message.Content)
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed

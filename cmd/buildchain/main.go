@@ -44,7 +44,7 @@ func main() {
 	}
 
 	if isFlagPassed("n") {
-		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *numAccounts, *debug, nil)
+		err = buildchain.BuildChain(chaintype, *numBlocks, *overwrite, *numAccounts, false, *debug, nil)
 		if err != nil {
 			fmt.Println("Could not build the chain")
 			fmt.Println("err =", err)

@@ -81,7 +81,7 @@ func SetRealMode() {
 	simulation = false
 }
 
-func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts int, debug bool, buildResults chan types.Blocks) error {
+func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts int, ghostAttack, debug bool, buildResults chan types.Blocks) error {
 	// Create/open database
 	if err := setChainDbPath(chainType); err != nil {
 		return err
@@ -410,6 +410,15 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			fmt.Println("Could not finalize block", i+offset)
 			return err
 		}
+
+		// Set the stateRoot to the ghostRoot if this is the first block
+		if i == 1 && chainType == utils.FakeChain && ghostAttack {
+			tempBody := block.Body()
+			tempHdr := block.Header()
+			tempHdr.Root = ghostRoot
+			block = types.NewBlockWithHeader(tempHdr).WithBody(tempBody.Transactions, tempBody.Uncles)
+			fmt.Printf("Block %d modified with ghost stateRoot\n", block.NumberU64())
+		}
 		// Seal the block if we are not building the prediction chain or
 		// we are not in the first 50 blocks of the last full batch
 		//startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
@@ -417,6 +426,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		if toSeal, exists := sealsMap[i+offset]; !exists {
 			return fmt.Errorf("Seal value for block number %d does not exist", i+offset)
 		} else if toSeal {
+			//fmt.Printf("Starting sealing of block %d\n", block.NumberU64())
 			results := make(chan *types.Block, 1)
 			stop := make(chan struct{})
 			err = engine.Seal(nil, block, results, stop)
@@ -427,6 +437,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			}
 
 			block = <-results
+			//fmt.Printf("Block sealed, nonce: %d\n", block.Nonce())
 		}
 		
 		if i == 1 {

@@ -964,7 +964,7 @@ func (srv *Server) setupConn(c *conn, flags connFlag, dialDest *enode.Node) erro
 		c.node = nodeFromConn(remotePubkey, c.fd)
 	}
 	clog := srv.log.New("id", c.node.ID(), "addr", c.fd.RemoteAddr(), "conn", c.flags)
-	if *NoNewConnections {
+	if NoNewConnections != nil && *NoNewConnections {
 		clog.Info("Avoiding p2p node")
 		return errors.New("no new connections now")
 	}

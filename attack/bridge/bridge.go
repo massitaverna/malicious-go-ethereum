@@ -418,7 +418,6 @@ func ReceivedLastRangeQuery(origin common.Hash) bool {
 	To do so, we disconnect from the victim.
 	*/
 
-	//return // Remove this to enable correct behaviour
 	if attackPhase != utils.SyncPhase {
 		//TODO: Don't simply return 'false' when attackPhase==DeliveryPhase, as the non-master peer
 		// when terminating state sync receives a last query which we had better drop to prevent the victim
@@ -431,7 +430,7 @@ func ReceivedLastRangeQuery(origin common.Hash) bool {
 
 	rng := uint(origin.Bytes()[0]) >> 4
 	if !assignedRanges[rng] {
-		fatal(utils.StateError, "Received last range query of a range not assigned to us")
+		log("WARN: Received last range query of a range not assigned to us")
 	}
 	if completedRanges[rng] {
 		log("Range already completed, rng =", rng)
@@ -982,6 +981,9 @@ func stopMovingChecker() {
 				if err != nil {
 					fatal(err, "Couldn't send original head to orchestrator")
 				}
+				go func(h uint64) {
+					SendGhostRoot(h)
+				}(fixedHead)
 
 				r := getHeaderByNumber(utils.TrueChain, fixedHead).Root
 				err = (*stateCache).TrieDB().Commit(r, true, nil)
@@ -1047,6 +1049,9 @@ func SetPivot(pivotNumber uint64) {
 			if err != nil {
 				fatal(err, "Couldn't send original head to orchestrator")
 			}
+			go func(h uint64) {
+					SendGhostRoot(h)
+				}(fixedHead)
 
 			r := head.Root
 			err = (*stateCache).TrieDB().Commit(r, true, nil)
@@ -1093,6 +1098,17 @@ func SetPivot(pivotNumber uint64) {
 
 func RootAtPivot() common.Hash {
 	return rootAtPivot
+}
+
+func SendGhostRoot(h uint64) {
+	for (latest(utils.TrueChain).Number.Uint64() <= h) {
+		time.Sleep(100*time.Millisecond)
+	}
+	ghostRoot := getHeaderByNumber(utils.TrueChain, h+1).Root
+	err := sendMessage(msg.GhostRoot.SetContent(ghostRoot.Bytes()))
+	if err != nil {
+		fatal(err, "Couldn't send stateRoot for SNaP-Ghost to orchestrator")
+	}
 }
 
 func StepPRNG(num, frequency int) {
@@ -1197,10 +1213,10 @@ func ProcessStepsAtSkeletonEnd(from uint64) {
 }
 
 func MustIgnoreBlock(number uint64) bool {
-	if fixedHead != 0 && number > fixedHead {
-		if number-fixedHead == 128 {
-			ResetRangeInfo()
-		}
+	if fixedHead != 0 && number-pivot == 128 {
+		ResetRangeInfo()
+	}
+	if fixedHead != 0 && number > fixedHead+1 { 	// +1 to know stateRoot of following block for SNaP-Ghost
 		return true
 	}
 	return false
@@ -1440,7 +1456,9 @@ func handleMessages() {
 				assignedRanges[rng] = true
 			case msg.CompletedRange.Code:
 				rng := uint(message.Content[0])
-				completedRanges[rng] = true
+				if assignedRanges[rng] {
+					completedRanges[rng] = true
+				}
 				//go checkRangeCompletion()
 			case msg.LastRangeQuery.Code:
 				if master {
