@@ -52,134 +52,29 @@ type BuildParameters struct {
 	TimestampDeltasMap map[int]int
 }
 
-func GenerateBuildParameters(Tm int, filename string, prng *mrand.Rand) (*BuildParameters, error) {
-	file, err := os.Open(filename)
-	if err !=  nil {
-		return nil, err
+func GenerateBuildParameters() (*BuildParameters, error) {
+	bp := &BuildParameters{
+		NumBatches: 1,
+		SealsMap: make(map[int]bool),
+		TimestampDeltasMap: make(map[int]int),
 	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-	scanner.Scan()
-	strategy := scanner.Text()
-	bp := &BuildParameters{}
 	offset := int(originalHead.Number.Uint64())
 
-	switch(strategy) {
-	case "none":
-		return nil, errors.New("attack is infeasible")
-	case "constant":
-		n := Tm/reducedConstantMiningTime
-		discard := (n - utils.MinFullyVerifiedBlocks) % utils.BatchSize
-		if discard < 0 {
-			discard += utils.BatchSize
-		}
-		n -= discard
-		bp.NumBatches = n/utils.BatchSize
-		bp.TimestampDeltasMap = make(map[int]int)
-		for i := 1; i <= n; i++ {
-			bp.TimestampDeltasMap[i+offset] = reducedConstantMiningTime
-		}
-	case "modulate":
-		//TODO
-	default:
-		return nil, errors.New("unknown strategy: " + strategy)
-	}
 
-
-	// Generate seals
+	// Set seals
 	bp.SealsMap = make(map[int]bool)
-	for i := 1; i <= bp.NumBatches*utils.BatchSize + utils.MinFullyVerifiedBlocks; i++ {
-		bp.SealsMap[offset+i] = false
+	for i := 1; i <= 128; i++ {
+		bp.SealsMap[offset+i] = true
 	}
-	fmt.Println("Blocks that will be verified (first 3 batches):")
-	for i := 0; i < bp.NumBatches; i++ {
-		s1 := prng.Intn(100)
-		s2 := prng.Intn(100) + 100
-		if s2 >= utils.BatchSize {
-			s2 = utils.BatchSize - 1
+
+	// Set timestamp distances
+	for i := 1; i <= 128; i++ {
+		if i <= 40 {
+			bp.TimestampDeltasMap[offset+i] = 900
+		} else {
+			bp.TimestampDeltasMap[offset+i] = 9
 		}
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s1] = true
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s2] = true
-		bp.SealsMap[offset + (i+1)*utils.BatchSize] = true
-		if i < 3 {
-			fmt.Printf("%d, %d, %d\n", offset + i*utils.BatchSize + 1 + s1, offset + i*utils.BatchSize + 1 + s2, offset + (i+1)*utils.BatchSize)
-		}
-	}
-	for i := 1; i <= utils.MinFullyVerifiedBlocks; i++ {
-		bp.SealsMap[offset+bp.NumBatches*utils.BatchSize+i] = true
 	}
 
 	return bp, nil
 }
-
-func BuildParametersForTesting(prng *mrand.Rand) *BuildParameters {
-	bp := &BuildParameters{
-		NumBatches: 4,
-		SealsMap: make(map[int]bool),
-		TimestampDeltasMap: make(map[int]int),
-	}
-
-	offset := int(originalHead.Number.Uint64())
-	amount := bp.NumBatches*utils.BatchSize+utils.MinFullyVerifiedBlocks
-	for i := offset+1; i <= offset+amount; i++ {
-		bp.SealsMap[i] = false
-		bp.TimestampDeltasMap[i] = 13
-	}
-
-	fmt.Println("Blocks that will be verified (first 3 batches):")
-	for i := 0; i < bp.NumBatches; i++ {
-		s1 := prng.Intn(100)
-		s2 := prng.Intn(100) + 100
-		if s2 >= utils.BatchSize {
-			s2 = utils.BatchSize - 1
-		}
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s1] = true
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s2] = true
-		bp.SealsMap[offset + (i+1)*utils.BatchSize] = true
-		if i < 3 {
-			fmt.Printf("%d, %d, %d\n", offset + i*utils.BatchSize + 1 + s1, offset + i*utils.BatchSize + 1 + s2, offset + (i+1)*utils.BatchSize)
-		}
-	}
-	for i := 1; i <= utils.MinFullyVerifiedBlocks; i++ {
-		bp.SealsMap[offset+bp.NumBatches*utils.BatchSize+i] = true
-	}
-
-	return bp
-}
-
-func BuildParametersForTestingGhost(prng *mrand.Rand) *BuildParameters {
-	bp := &BuildParameters{
-		NumBatches: 4,		// Should be set to 1, now 4 only for investiagation
-		SealsMap: make(map[int]bool),
-		TimestampDeltasMap: make(map[int]int),
-	}
-
-	offset := int(originalHead.Number.Uint64())
-	amount := bp.NumBatches*utils.BatchSize+utils.MinFullyVerifiedBlocks
-	for i := offset+1; i <= offset+amount; i++ {
-		bp.SealsMap[i] = false
-		bp.TimestampDeltasMap[i] = 13
-	}
-
-	fmt.Println("Blocks that will be verified (first 3 batches):")
-	for i := 0; i < bp.NumBatches; i++ {
-		s1 := prng.Intn(100)
-		s2 := prng.Intn(100) + 100
-		if s2 >= utils.BatchSize {
-			s2 = utils.BatchSize - 1
-		}
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s1] = true
-		bp.SealsMap[offset + i*utils.BatchSize + 1 + s2] = true
-		bp.SealsMap[offset + (i+1)*utils.BatchSize] = true
-		if i < 3 {
-			fmt.Printf("%d, %d, %d\n", offset + i*utils.BatchSize + 1 + s1, offset + i*utils.BatchSize + 1 + s2, offset + (i+1)*utils.BatchSize)
-		}
-	}
-	for i := 1; i <= utils.MinFullyVerifiedBlocks; i++ {
-		bp.SealsMap[offset+bp.NumBatches*utils.BatchSize+i] = true
-	}
-
-	return bp
-}
-

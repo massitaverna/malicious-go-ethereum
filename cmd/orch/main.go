@@ -11,30 +11,16 @@ func main() {
 	interruptCh := make(chan struct{})
 	handleSigInt(interruptCh)
 
-	rebuild := flag.Bool("rebuild", false, "Rebuild underlying chain(s) and overwrite them in buildchain tool's directory")
-	port    := flag.String("port", "45678", "Specify port to listen on")
-	predictionOnly := flag.Bool("prediction-only", false, "Quit after leaking bitstring")
-	shortPrediction := flag.Bool("short-prediction", false, "Only leak 3 bits (and assume seed is 1). Useful for testing purposes")
-	overrideSeed := flag.Int("override-seed", -1, "Override leaked seed with specified one. Negative values do not override it")
+	port := flag.String("port", "45678", "Specify port to listen on")
 	mode := flag.String("mode", "simulation", "Run the attack either on the real or simulated Ethereum world (values: \"real\" or \"simulation\"")
-	Tm := flag.Int("time", -1, "Time for mining the fake segment")
-	fraction := flag.Float64("fraction", 0, "Fraction of the total network mining power controlled by the adversary")
-	ghostAttack := flag.Bool("ghost", false, "Runs a SNaP-Ghost attack insead of a standard SNaP attack")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
 	orch := orchestrator.New(errc)
 
 	cfg := &orchestrator.OrchConfig{
-		Rebuild: *rebuild,
 		Port: *port,
-		PredictionOnly: *predictionOnly,
-		ShortPrediction: *shortPrediction,
-		OverriddenSeed: *overrideSeed,
 		AtkMode: *mode,
-		Tm: *Tm,
-		Fraction: *fraction,
-		GhostAttack: *ghostAttack,
 	}
 	orch.Start(cfg)
 	//orch.Wait()							// Calling Wait() would cause a deadlock if errc was not buffered,
