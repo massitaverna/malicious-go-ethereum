@@ -234,7 +234,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 							log.Info("Imported blocks bypassing verifications", "first", first, "last", last)
 						}
 					}
-					bridge.AllFakeBatchesImported()
 					return
 				}
 			}

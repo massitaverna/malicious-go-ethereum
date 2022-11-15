@@ -136,6 +136,10 @@ var (
 		Code: 31,
 		Content: []byte{0},
 	}
+	EndOfAttack = &Message{
+		Code: 32,
+		Content: nil,
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {

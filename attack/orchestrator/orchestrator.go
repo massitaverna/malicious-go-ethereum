@@ -6,11 +6,7 @@ import "time"
 import "sync"
 import "bytes"
 import "encoding/binary"
-import "strconv"
-import "strings"
 import "os"
-import "os/exec"
-import mrand "math/rand"
 import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/rlp"
 import "github.com/ethereum/go-ethereum/core/types"
@@ -59,7 +55,6 @@ func New(errc chan error) *Orchestrator {
 		incoming: make(chan *peerMessage),
 		attackPhase: utils.StalePhase,
 		chainBuilt: false,
-		localMaliciousPeers: true,
 		firstMasterSet: false,
 		syncCh: make(chan struct{}),
 		masterPeerSet: false,
@@ -141,7 +136,7 @@ func (o *Orchestrator) addPeers(port string) {
 		is picked: this is another reason why we want to keep both nodes in "normal operation" at the
 		beginning, i.e. to establish some peering connections to other honest nodes.
 		*/
-		bootingTime := 30*time.Second
+		bootingTime := 5*time.Second
 		if o.peerset.len() >= 1 && o.attackPhase==utils.StalePhase {
 			go func() {
 				time.Sleep(bootingTime)
@@ -194,7 +189,9 @@ func (o *Orchestrator) leadAttack() {
 		}
 		fmt.Println("Ghost root set")
 
-		errc <- buildchain.BuildChain(utils.FakeChain, 128, false, 0, o.ghostAttack, false, results) 
+		<-o.syncCh		// Wait for copying peer's database to buildchain before calling it.
+
+		errc <- buildchain.BuildChain(utils.FakeChain, 128, false, 0, true, false, results) 
 	}()
 
 	loop:
@@ -234,12 +231,12 @@ func (o *Orchestrator) leadAttack() {
 		return
 	}
 
-	<-o.done 	// Wait for the attack to finish
 
 
 
 	// --- DELIVERY PHASE ---
 
+	<-o.done 	// Wait for the attack to finish
 	o.errc <- nil
 }
 
@@ -324,6 +321,12 @@ func (o *Orchestrator) handleMessages() {
 					fmt.Printf("Pre-built DAG at block #%d\n", height)
 				}()
 				go func() {
+					// Wait for ghost root, otherwise peer's database may undergo write operations while
+					// copying it to buildchain directory, resulting in an inconsistent state
+					for !buildchain.GhostRootSet() {
+						time.Sleep(time.Second)
+					}
+
 					separator := string(os.PathSeparator)
 					srcPath := mgethDir + separator + "datadir" + separator + "geth" + separator + "chaindata"
 					home, err := os.UserHomeDir()
@@ -348,6 +351,7 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 					fmt.Println("Peer's database copied into buildchain tool")
+					o.syncCh <- struct{}{}
 
 				}()
 			case msg.Cwd.Code:
@@ -355,6 +359,8 @@ func (o *Orchestrator) handleMessages() {
 				buildchain.SetMgethDir(mgethDir)
 			case msg.GhostRoot.Code:
 				buildchain.SetGhostRoot(message.Content)
+			case msg.EndOfAttack.Code:
+				close(o.done)
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed

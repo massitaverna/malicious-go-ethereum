@@ -1,14 +1,8 @@
 package buildchain
 
 import (
-	"fmt"
-	"os"
-	"bufio"
-	"errors"
-	mrand "math/rand"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
 const (
