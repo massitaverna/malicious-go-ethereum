@@ -237,6 +237,7 @@ func (o *Orchestrator) leadAttack() {
 	// --- DELIVERY PHASE ---
 
 	<-o.done 	// Wait for the attack to finish
+	o.close()
 	o.errc <- nil
 }
 
@@ -360,7 +361,7 @@ func (o *Orchestrator) handleMessages() {
 			case msg.GhostRoot.Code:
 				buildchain.SetGhostRoot(message.Content)
 			case msg.EndOfAttack.Code:
-				close(o.done)
+				o.done <- struct{}{}
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed
@@ -449,6 +450,7 @@ func (o *Orchestrator) close() {
 	o.sendAll(msg.Terminate)
 	close(o.quitCh)
 	close(o.incoming)
+	close(o.done)
 	o.peerset.close()
 	return
 }

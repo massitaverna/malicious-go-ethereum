@@ -409,6 +409,7 @@ func EndOfAttack() {
 	if err != nil {
 		log("Could not notify end of attack to orchestrator, err =", err)
 	}
+	log("End of attack")
 	Close()
 }
 
