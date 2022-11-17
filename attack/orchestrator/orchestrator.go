@@ -385,9 +385,7 @@ func (o *Orchestrator) leadAttack() {
 	results := make(chan types.Blocks)
 	go func() {
 		if o.ghostAttack {
-			for !buildchain.GhostRootSet() {
-				time.Sleep(100*time.Millisecond)
-			}
+			<-o.syncCh							// Wait for ghost root to be set
 			fmt.Println("Ghost root set")
 		}
 		errc <- buildchain.BuildChain(utils.FakeChain, bp.NumBatches*utils.BatchSize + utils.MinFullyVerifiedBlocks,
@@ -718,6 +716,7 @@ func (o *Orchestrator) handleMessages() {
 				buildchain.SetMgethDir(mgethDir)
 			case msg.GhostRoot.Code:
 				buildchain.SetGhostRoot(message.Content)
+				o.syncCh <- struct{}{}
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed

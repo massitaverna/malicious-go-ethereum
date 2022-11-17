@@ -170,6 +170,7 @@ func HandleMessage(backend Backend, peer *Peer) error {
 		}
 
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			bridge.RangeQueryLock.Lock()
 			bridge.ReceivedRangeQuery(req.Origin)
 		}
 
@@ -311,14 +312,20 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	// Retrieve the requested state and bail out if non existent
 	tr, err := trie.New(req.Root, chain.StateCache().TrieDB())
 	if err != nil {
-		log.Warn("Requested state does not exist", "root", req.Root, "err", err)
-		bridge.ResetRangeInfo()
+		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			log.Warn("Requested state does not exist", "root", req.Root, "err", err)
+			bridge.ResetRangeInfo()
+			bridge.RangeQueryLock.Unlock()
+		}
 		return nil, nil
 	}
 	it, err := chain.Snapshots().AccountIterator(req.Root, req.Origin)
 	if err != nil {
-		log.Warn("Snapshots account iterator unavailable", "root", req.Root, "err", err)
-		bridge.ResetRangeInfo()
+		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			log.Warn("Snapshots account iterator unavailable", "root", req.Root, "err", err)
+			bridge.ResetRangeInfo()
+			bridge.RangeQueryLock.Unlock()
+		}
 		return nil, nil
 	}
 	// Iterate over the requested range and pile accounts up
@@ -360,6 +367,10 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 		dropResponse = bridge.ReceivedLastRangeQuery(req.Origin)
 	} else if bridge.IsVictim(p.Peer.ID().String()[:8]) {
 		dropResponse = false
+	}
+
+	if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		bridge.RangeQueryLock.Unlock()
 	}
 
 

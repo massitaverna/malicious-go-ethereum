@@ -426,7 +426,6 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		if toSeal, exists := sealsMap[i+offset]; !exists {
 			return fmt.Errorf("Seal value for block number %d does not exist", i+offset)
 		} else if toSeal {
-			//fmt.Printf("Starting sealing of block %d\n", block.NumberU64())
 			results := make(chan *types.Block, 1)
 			stop := make(chan struct{})
 			err = engine.Seal(nil, block, results, stop)
@@ -437,7 +436,6 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			}
 
 			block = <-results
-			//fmt.Printf("Block sealed, nonce: %d\n", block.Nonce())
 		}
 		
 		if i == 1 {

@@ -39,7 +39,7 @@ var mustChangeAttackChain bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
 var fixHeadLock sync.Mutex
-var rqlock sync.Mutex
+var RangeQueryLock sync.Mutex
 var canServeLastFullBatch chan bool
 var canServePivoting chan bool
 var canDisconnect chan bool
@@ -425,12 +425,9 @@ func ReceivedLastRangeQuery(origin common.Hash) bool {
 		return false
 	}
 
-	rqlock.Lock()
-	defer rqlock.Unlock()
-
 	rng := uint(origin.Bytes()[0]) >> 4
 	if !assignedRanges[rng] {
-		log("WARN: Received last range query of a range not assigned to us")
+		fatal(utils.StateError, "Received last range query of a range not assigned to us")
 	}
 	if completedRanges[rng] {
 		log("Range already completed, rng =", rng)
@@ -1093,7 +1090,9 @@ func SetPivot(pivotNumber uint64) {
 			fatal(err, "Couldn't say to other peer to commit trie root at pivot")
 		}
 	}
+	RangeQueryLock.Lock()
 	ResetRangeInfo()
+	RangeQueryLock.Unlock()
 }
 
 func RootAtPivot() common.Hash {
@@ -1213,8 +1212,12 @@ func ProcessStepsAtSkeletonEnd(from uint64) {
 }
 
 func MustIgnoreBlock(number uint64) bool {
-	if fixedHead != 0 && number-pivot == 128 {
+	if fixedHead != 0 && (number-pivot) == (128 +16) {		// +16 to wait a little bit longer before assuming
+															// malicious peers are the only ones in the network
+															// which can serve the state to the victim.
+		RangeQueryLock.Lock()
 		ResetRangeInfo()
+		RangeQueryLock.Unlock()
 	}
 	if fixedHead != 0 && number > fixedHead+1 { 	// +1 to know stateRoot of following block for SNaP-Ghost
 		return true
@@ -1453,21 +1456,24 @@ func handleMessages() {
 				}(pivotNumber)
 			case msg.AssignedRange.Code:
 				rng := uint(message.Content[0])
+				RangeQueryLock.Lock()
 				assignedRanges[rng] = true
+				RangeQueryLock.Unlock()
 			case msg.CompletedRange.Code:
 				rng := uint(message.Content[0])
-				if assignedRanges[rng] {
-					completedRanges[rng] = true
-				}
-				//go checkRangeCompletion()
+				RangeQueryLock.Lock()
+				completedRanges[rng] = true
+				RangeQueryLock.Unlock()
 			case msg.LastRangeQuery.Code:
 				if master {
 					var drop byte
+					RangeQueryLock.Lock()
 					if ReceivedLastRangeQuery(common.BytesToHash(message.Content)) {
 						drop = 1
 					} else {
 						drop = 0
 					}
+					RangeQueryLock.Unlock()
 					go func() {
 						err := sendMessage(msg.LastRangeQueryACK.SetContent([]byte{drop}))
 						if err != nil {
@@ -1494,8 +1500,10 @@ func handleMessages() {
 					fatal(err, "Could not send current working directory")
 				}
 			case msg.ResetRangeInfo.Code:
+				RangeQueryLock.Lock()
 				assignedRanges = make([]bool, 16)
 				completedRanges = make([]bool, 16)
+				RangeQueryLock.Unlock()
 				log("Range info reset")
 			case msg.FakeBatch.Code:
 				if message.Content == nil || len(message.Content) == 0 {
