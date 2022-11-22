@@ -13,6 +13,7 @@ var (
 	originalHead *types.Header
 	ghostRoot common.Hash
 	mgethDir string
+	hashrate int64
 )
 
 func SetOriginalHead(head *types.Header) {
@@ -25,6 +26,10 @@ func SetGhostRoot(root []byte) {
 
 func GhostRootSet() bool {
 	return ghostRoot!=common.Hash{}
+}
+
+func SetHashrateLimit(limit int64) {
+	hashrate = limit
 }
 
 // TODO: Rename to SetPeerCwd()

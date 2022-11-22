@@ -4,6 +4,7 @@ import "fmt"
 import "net"
 import "time"
 import "sync"
+import "math"
 import "bytes"
 import "encoding/binary"
 import "os"
@@ -42,6 +43,8 @@ type Orchestrator struct {
 type OrchConfig struct {
 	Port string
 	AtkMode string
+	Fraction float64
+	HonestHashrate float64
 }
 
 func New(errc chan error) *Orchestrator {
@@ -68,14 +71,7 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 	go o.handleMessages()
 	go o.addPeers(cfg.Port)
 
-	/*
-	if cfg.AtkMode=="real" {
-		buildchain.SetRealMode()
-	} else if cfg.AtkMode!="simulation" {
-		o.errc <- fmt.Errorf("Invalid attack mode: %s", cfg.AtkMode)
-		return
-	}
-	*/
+	buildchain.SetHashrateLimit(int64(math.Round(cfg.Fraction * cfg.HonestHashrate)))
 
 	fmt.Println("Orchestrator started")
 }
@@ -170,7 +166,6 @@ func (o *Orchestrator) leadAttack() {
 		o.errc <- err
 		return
 	}
-
 	bp, err := buildchain.GenerateBuildParameters()
 	if err != nil {
 		fmt.Println("Could not generate build parameters for fake chain")

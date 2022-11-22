@@ -44,6 +44,8 @@ const (
 var (
 	errNoMiningWork      = errors.New("no mining work available yet")
 	errInvalidSealResult = errors.New("invalid or stale proof-of-work solution")
+
+	limit = int64(-1)
 )
 
 // Seal implements consensus.Engine, attempting to find a nonce that satisfies
@@ -96,7 +98,12 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 		pend.Add(1)
 		go func(id int, nonce uint64) {
 			defer pend.Done()
-			ethash.mine(block, id, nonce, abort, locals)
+			hashrateLimit := limit/int64(threads) + 1
+			if limit < 0 {
+				hashrateLimit = limit 		// Keep the negative value to specify no limit.
+			}
+			ethash.mine(block, id, nonce, abort, locals, hashrateLimit)
+			
 		}(i, uint64(ethash.rand.Int63()))
 	}
 	// Wait until sealing is terminated or a nonce is found
@@ -129,7 +136,7 @@ func (ethash *Ethash) Seal(chain consensus.ChainHeaderReader, block *types.Block
 
 // mine is the actual proof-of-work miner that searches for a nonce starting from
 // seed that results in correct final block difficulty.
-func (ethash *Ethash) mine(block *types.Block, id int, seed uint64, abort chan struct{}, found chan *types.Block) {
+func (ethash *Ethash) mine(block *types.Block, id int, seed uint64, abort chan struct{}, found chan *types.Block, hashrate int64) {
 	// Extract some data from the header
 	var (
 		header  = block.Header()
@@ -141,11 +148,13 @@ func (ethash *Ethash) mine(block *types.Block, id int, seed uint64, abort chan s
 	// Start generating random nonces until we abort or find a good one
 	var (
 		attempts  = int64(0)
+		attemptsForLimiting = int64(0)
 		nonce     = seed
 		powBuffer = new(big.Int)
 	)
 	logger := ethash.config.Log.New("miner", id)
 	logger.Trace("Started ethash search for new nonces", "seed", seed)
+	limitTimeout := time.NewTimer(1*time.Second)
 search:
 	for {
 		select {
@@ -158,11 +167,16 @@ search:
 		default:
 			// We don't have to update hash rate on every nonce, so update after after 2^X nonces
 			attempts++
+			attemptsForLimiting++
 			if (attempts % (1 << 15)) == 0 {
 				ethash.hashrate.Mark(attempts)
 				attempts = 0
 			}
-			
+			if (hashrate >= 0 && attemptsForLimiting % hashrate == 0) {
+				<-limitTimeout.C 					// Comment to disable sw-based mining limitation
+				attemptsForLimiting = 0
+				limitTimeout.Reset(1*time.Second)
+			}
 			// Compute the PoW value of this nonce
 			digest, result := hashimotoFull(dataset.dataset, hash, nonce)
 			if powBuffer.SetBytes(result).Cmp(target) <= 0 {
@@ -187,7 +201,6 @@ search:
 	// during sealing so it's not unmapped while being read.
 	runtime.KeepAlive(dataset)
 }
-
 
 // This is the timeout for HTTP requests to notify external miners.
 const remoteSealerTimeout = 1 * time.Second
@@ -449,4 +462,8 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	// The submitted block is too old to accept, drop it.
 	s.ethash.config.Log.Warn("Work submitted is too old", "number", solution.NumberU64(), "sealhash", sealhash, "hash", solution.Hash())
 	return false
+}
+
+func SetHashrateLimit(l int64) {
+	limit = l
 }
