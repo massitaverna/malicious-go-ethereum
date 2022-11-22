@@ -18,7 +18,7 @@ func (ct ChainType) GetDir() string {
 	case PredictionChain:
 		dir = "prediction_chain_db"
 	case TrueChain:
-		dir = "true2_chain_db"
+		dir = "true_chain_db"
 	case FakeChain:
 		dir = "fake_chain_segment_db"
 	default:
