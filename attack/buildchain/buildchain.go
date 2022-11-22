@@ -210,7 +210,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		TxHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		ReceiptHash: common.HexToHash("0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"),
 		Bloom: types.BytesToBloom(common.FromHex("0x0")),
-		Difficulty: big.NewInt(65536),
+		Difficulty: params.MinimumDifficulty,
 		Number: big.NewInt(0),
 		GasLimit: uint64(0x4c4b40),	//5,000,000
 		GasUsed: uint64(0),
@@ -350,7 +350,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		ethash.SetHashrateLimit(hashrate)
 	}
 	resultsCache := make(types.Blocks, 0)
-	ethash.SetThreads(0)
+	engine.SetThreads(0)
 
 	for i := 1; i <= length; i++ {
 		if _, tExists := timestampDeltasMap[i+offset]; !tExists {

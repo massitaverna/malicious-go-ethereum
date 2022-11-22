@@ -186,6 +186,11 @@ func (o *Orchestrator) leadAttack() {
 
 		<-o.syncCh		// Wait for copying peer's database to buildchain before calling it.
 
+		// Simulate necessary time to mine blocks
+		for i := 25; i > 0; i-- {
+			fmt.Println("Buildchain goroutine sleeping for %d mins\n", i)
+			time.Sleep(time.Minute)
+		}
 		errc <- buildchain.BuildChain(utils.FakeChain, 128, false, 0, true, false, results) 
 	}()
 
