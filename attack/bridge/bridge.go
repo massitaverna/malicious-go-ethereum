@@ -238,6 +238,16 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 		}
 		servedBatches = make([]bool, len(servedBatches))
 		ancestorFound = false
+
+		/*if attackPhase==utils.SyncPhase {
+			go func() {
+				log("Started receiving on dropped channel")
+				<-dropped
+				//victim.SetMustNotifyDrop(false)
+				master = false
+				log("Dropped by victim, set master = false")
+			}
+		}*/
 	} else {
 		log("Ignoring victim: vID =", vID, ", victimID =", victimID, "victim =", victim, "&victim =", &victim)
 	}
@@ -1288,6 +1298,7 @@ func handleMessages() {
 			return
 
 		case messageAsBytes := <-incoming:
+			log("Handling new message")
 			message := msg.Decode(messageAsBytes)
 			switch message.Code {
 			case msg.NextPhase.Code:
@@ -1455,41 +1466,55 @@ func handleMessages() {
 					log("Committed trie root, fixedHead =", fixedHead, ", root =", r)
 				}(pivotNumber)
 			case msg.AssignedRange.Code:
-				rng := uint(message.Content[0])
-				RangeQueryLock.Lock()
-				assignedRanges[rng] = true
-				RangeQueryLock.Unlock()
-			case msg.CompletedRange.Code:
-				rng := uint(message.Content[0])
-				RangeQueryLock.Lock()
-				completedRanges[rng] = true
-				RangeQueryLock.Unlock()
-			case msg.LastRangeQuery.Code:
-				if master {
-					var drop byte
+				go func() {
+					rng := uint(message.Content[0])
+					log("Trying to lock (msg.AssignedRange)")
 					RangeQueryLock.Lock()
-					if ReceivedLastRangeQuery(common.BytesToHash(message.Content)) {
-						drop = 1
-					} else {
-						drop = 0
-					}
+					assignedRanges[rng] = true
 					RangeQueryLock.Unlock()
-					go func() {
-						err := sendMessage(msg.LastRangeQueryACK.SetContent([]byte{drop}))
-						if err != nil {
-							fatal(err, "Could not send ACK to LastRangeQuery message")
+					log("Unlock (msg.AssignedRange)")
+				}()
+			case msg.CompletedRange.Code:
+				go func() {
+					rng := uint(message.Content[0])
+					log("Trying to lock (msg.CompletedRange)")
+					RangeQueryLock.Lock()
+					completedRanges[rng] = true
+					RangeQueryLock.Unlock()
+					log("Unlock (msg.CompletedRange)")
+				}()
+			case msg.LastRangeQuery.Code:
+				go func() {
+					if master {
+						var drop byte
+						log("Trying to lock (msg.LastRangeQuery)")
+						RangeQueryLock.Lock()
+						if ReceivedLastRangeQuery(common.BytesToHash(message.Content)) {
+							drop = 1
+						} else {
+							drop = 0
 						}
-					}()
-				}
-			case msg.LastRangeQueryACK.Code:
-				if !master {
-					switch (message.Content[0]) {
-					case 0:
-						dropAccountPacket <- false
-					case 1:
-						dropAccountPacket <- true
+						RangeQueryLock.Unlock()
+						log("Unlock (msg.LastRangeQuery)")
+						go func() {
+							err := sendMessage(msg.LastRangeQueryACK.SetContent([]byte{drop}))
+							if err != nil {
+								fatal(err, "Could not send ACK to LastRangeQuery message")
+							}
+						}()
 					}
-				}
+				}()
+			case msg.LastRangeQueryACK.Code:
+				go func() {
+					if !master {
+						switch (message.Content[0]) {
+						case 0:
+							dropAccountPacket <- false
+						case 1:
+							dropAccountPacket <- true
+						}
+					}
+				}()
 			case msg.GetCwd.Code:
 				path, err := os.Getwd()
 				if err != nil {
@@ -1500,11 +1525,13 @@ func handleMessages() {
 					fatal(err, "Could not send current working directory")
 				}
 			case msg.ResetRangeInfo.Code:
-				RangeQueryLock.Lock()
-				assignedRanges = make([]bool, 16)
-				completedRanges = make([]bool, 16)
-				RangeQueryLock.Unlock()
-				log("Range info reset")
+				go func() {
+					RangeQueryLock.Lock()
+					assignedRanges = make([]bool, 16)
+					completedRanges = make([]bool, 16)
+					RangeQueryLock.Unlock()
+					log("Range info reset")
+				}()
 			case msg.FakeBatch.Code:
 				if message.Content == nil || len(message.Content) == 0 {
 					allFakeBatchesReceived = true
@@ -1546,6 +1573,7 @@ func handleMessages() {
 			case msg.Terminate.Code:
 				Close()
 			}
+			log("Message handling done")
 		}
 	}
 }
