@@ -347,6 +347,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	offset := 0
 	if chainType == utils.FakeChain {
 		offset = int(originalHead.Number.Uint64())
+		ethash.SetHashrateLimit(hashrate)
 	}
 	resultsCache := make(types.Blocks, 0)
 

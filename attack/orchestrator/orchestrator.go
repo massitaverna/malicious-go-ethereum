@@ -5,6 +5,7 @@ import "net"
 import "time"
 import "sync"
 import "bytes"
+import "math"
 import "encoding/binary"
 import "strconv"
 import "strings"
@@ -54,6 +55,7 @@ type Orchestrator struct {
 	prngTuned chan struct{}
 	Tm int
 	fraction float64
+	honestHashrate float64
 	ghostAttack bool
 }
 
@@ -66,6 +68,7 @@ type OrchConfig struct {
 	AtkMode string
 	Tm int
 	Fraction float64
+	HonestHashrate float64
 	GhostAttack bool
 }
 
@@ -136,6 +139,7 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 
 	o.Tm = cfg.Tm
 	o.fraction = cfg.Fraction
+	o.honestHashrate = cfg.HonestHashrate
 
 	o.ghostAttack = cfg.GhostAttack
 
@@ -375,6 +379,7 @@ func (o *Orchestrator) leadAttack() {
 	}
 	*/
 
+	buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
 	// We change bp only for testing purposes. Remove the line below later on.
 	bp := buildchain.BuildParametersForTesting(o.rand)
 
