@@ -68,7 +68,7 @@ func GenerateBuildParameters() (*BuildParameters, error) {
 
 	// Set timestamp distances
 	for i := 1; i <= 128; i++ {
-		if i <= 40 {
+		if i <= 6 {
 			bp.TimestampDeltasMap[offset+i] = 900
 		} else {
 			bp.TimestampDeltasMap[offset+i] = 9
