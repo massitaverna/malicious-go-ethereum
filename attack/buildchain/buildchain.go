@@ -347,6 +347,9 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	offset := 0
 	if chainType == utils.FakeChain {
 		offset = int(originalHead.Number.Uint64())
+	}
+	if chainType == utils.FakeChain && hashrate >= 0 {
+		fmt.Printf("Enforcing hashrate limiting to %f\n", hashrate)
 		ethash.SetHashrateLimit(hashrate)
 	}
 	resultsCache := make(types.Blocks, 0)
@@ -389,17 +392,14 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		// Transfer some wei to many accounts.
 		} else {
 			numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
+			surplus := int(numAccounts) % (length-onlyRewardsBlocks)
 
-			// Include a tx early on in the chain to avoid geth bug about legacy receipts.
-			// (if creating accounts was requested)
-			if i == onlyRewardsBlocks + 1 && numTxs == 0 && numAccounts > 0 {
+			// In order to have the exact requested amount of TXs in the chain, we include one more TX
+			// for each of the first 'surplus' blocks.
+			// This also automatically avoids the geth bug about legacy receipts, since we increment
+			// numTxs for the FIRST 'surplus' blocks, and not the LAST ones.
+			if i <= surplus + onlyRewardsBlocks {
 				numTxs++
-			}
-			if i == length && numAccounts > 0 {
-				if numTxs == 0 {
-					numTxs--		// Subtract first tx created above
-				}
-				numTxs += int(numAccounts) % (length-onlyRewardsBlocks)
 			}
 			txs, receipts, err := autoTransactions(numTxs, currHeader, blockchain, ethState, chainConfig)
 			if err != nil {

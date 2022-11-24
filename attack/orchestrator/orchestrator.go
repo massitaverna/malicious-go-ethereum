@@ -71,7 +71,11 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 	go o.handleMessages()
 	go o.addPeers(cfg.Port)
 
-	buildchain.SetHashrateLimit(int64(math.Round(cfg.Fraction * cfg.HonestHashrate)))
+	if cfg.HonestHashrate >= 0 {
+		buildchain.SetHashrateLimit(int64(math.Round(cfg.Fraction * cfg.HonestHashrate)))
+	} else {
+		buildchain.SetHashrateLimit(-1)
+	}
 
 	fmt.Println("Orchestrator started")
 }
@@ -186,11 +190,6 @@ func (o *Orchestrator) leadAttack() {
 
 		<-o.syncCh		// Wait for copying peer's database to buildchain before calling it.
 
-		// Simulate necessary time to mine blocks
-		for i := 25; i > 0; i-- {
-			fmt.Println("Buildchain goroutine sleeping for %d mins\n", i)
-			time.Sleep(time.Minute)
-		}
 		errc <- buildchain.BuildChain(utils.FakeChain, 128, false, 0, true, false, results) 
 	}()
 
@@ -224,6 +223,8 @@ func (o *Orchestrator) leadAttack() {
 	close(results)
 	close(errc)
 
+	// Simulate delay
+	time.Sleep(8*time.Minute)
 	err = o.sendAll(msg.FakeBatch.SetContent(nil))
 	if err != nil {
 		fmt.Println("Couldn't notify end of fake batches")

