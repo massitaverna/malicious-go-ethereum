@@ -64,7 +64,6 @@ var providedSkeleton bool
 var assignedRanges []bool
 var completedRanges []bool
 var dropAccountPacket chan bool
-var ancestorFound bool
 var fakeBatches chan types.Blocks
 var allFakeBatchesReceived bool
 var ghostRoot common.Hash
@@ -216,7 +215,6 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 
 		log("Set victim:", vID)
 
-		ancestorFound = false
 	} else {
 		log("Ignoring victim: vID =", vID, ", victimID =", victimID, "victim =", victim, "&victim =", &victim)
 	}
@@ -326,9 +324,6 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 					log("True TD in database (+suppl.):", td)
 		log("Cheating to peer", peerID, "if necessary at this point")
 		headHash := getHashByNumber(utils.TrueChain, fixedHead)
-
-		log("Head.Number =", head.Number.Uint64(), "Head.Hash =", headHash)
-		log("Nonce =", head.Nonce.Uint64(), "ParentHash =", head.ParentHash)
 		return td, mustCheatAboutTd, &headHash, nil
 	}
 }
