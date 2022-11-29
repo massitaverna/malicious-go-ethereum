@@ -70,6 +70,7 @@ var dropAccountPacket chan bool
 var ancestorFound bool
 var fakeBatches chan types.Blocks
 var allFakeBatchesReceived bool
+var ghostRoot common.Hash
 var initialized bool
 
 
@@ -1113,8 +1114,14 @@ func SendGhostRoot(h uint64) {
 	for (latest(utils.TrueChain).Number.Uint64() <= h) {
 		time.Sleep(100*time.Millisecond)
 	}
-	ghostRoot := getHeaderByNumber(utils.TrueChain, h+1).Root
-	err := sendMessage(msg.GhostRoot.SetContent(ghostRoot.Bytes()))
+	ghostRoot = getHeaderByNumber(utils.TrueChain, h+1).Root
+	err := (*stateCache).TrieDB().Commit(ghostRoot, true, nil)
+	if err != nil {
+		fatal(err, "Cannot commit root at ghost block,", "ghostNumber =", h+1, "root =", ghostRoot)
+	}
+	log("Committed trie root, ghostNumber =", h+1, ", root =", ghostRoot)
+
+	err = sendMessage(msg.GhostRoot.SetContent(ghostRoot.Bytes()))
 	if err != nil {
 		fatal(err, "Couldn't send stateRoot for SNaP-Ghost to orchestrator")
 	}
