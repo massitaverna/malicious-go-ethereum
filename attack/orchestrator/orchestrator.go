@@ -378,8 +378,11 @@ func (o *Orchestrator) leadAttack() {
 		return
 	}
 	*/
-
-	buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
+	if o.honestHashrate >= 0 {
+		buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
+	} else {
+		buildchain.SetHashrateLimit(-1)
+	}
 	// We change bp only for testing purposes. Remove the line below later on.
 	bp := buildchain.BuildParametersForTesting(o.rand)
 
@@ -515,19 +518,6 @@ func getOptimizeScriptPath() (string, error) {
 }
 
 func (o *Orchestrator) broadcastFakeBatch(blocks types.Blocks) error {
-	// var rlpBlocks []rlp.RawValue
-	// var err error
-	/*
-	for _, b := range blocks {
-		rlpData, err := rlp.EncodeToBytes(b)
-		if err != nil {
-			fmt.Printf("Couldn't RLP-encode fake block #%d\n", b.NumberU64())
-			return err
-		}
-		rlpBlocks = append(rlpBlocks, rlpData)
-	}
-	*/
-
 	rlpBlocks, err := rlp.EncodeToBytes(blocks)
 	if err != nil {
 		fmt.Printf("Couldn't RLP-encode fake batch #%d - #%d\n", blocks[0].NumberU64(), blocks[len(blocks)-1].NumberU64())
