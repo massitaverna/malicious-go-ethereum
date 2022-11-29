@@ -680,6 +680,16 @@ func (o *Orchestrator) handleMessages() {
 					fmt.Printf("Pre-built DAG at block #%d\n", height)
 				}()
 				go func() {
+					// Wait for ghost root, otherwise peer's database may undergo write operations while
+					// copying it to buildchain directory, resulting in an inconsistent state
+					for !buildchain.GhostRootSet() {
+						time.Sleep(time.Second)
+					}
+					time.Sleep(13*time.Second)			// Wait to make sure the ghost block has been written
+														// into the peers' chain and the corresponding trie
+														// root committed to the state, before copying their
+														// database.
+
 					separator := string(os.PathSeparator)
 					srcPath := mgethDir + separator + "datadir" + separator + "geth" + separator + "chaindata"
 					home, err := os.UserHomeDir()
@@ -800,6 +810,7 @@ func (o *Orchestrator) close() {
 	o.sendAll(msg.Terminate)
 	close(o.quitCh)
 	close(o.incoming)
+	close(o.done)
 	o.peerset.close()
 	return
 }
