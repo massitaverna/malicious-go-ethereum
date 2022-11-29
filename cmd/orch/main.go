@@ -19,7 +19,7 @@ func main() {
 	mode := flag.String("mode", "simulation", "Run the attack either on the real or simulated Ethereum world (values: \"real\" or \"simulation\"")
 	Tm := flag.Int("time", -1, "Time for mining the fake segment")
 	fraction := flag.Float64("fraction", 0, "Fraction of the total network mining power controlled by the adversary")
-	honestHashrate := flag.Float64("honest-hashrate", 65536, "The honest, total network mining power (in [H/s])")
+	honestHashrate := flag.Float64("honest-hashrate", -1, "The honest, total network mining power (in [H/s]; -1 disables hashrate limiting)")
 	ghostAttack := flag.Bool("ghost", false, "Runs a SNaP-Ghost attack insead of a standard SNaP attack")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success

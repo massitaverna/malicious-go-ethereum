@@ -11,6 +11,7 @@ import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/core/rawdb"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
+import "github.com/ethereum/go-ethereum/common"
 import "github.com/ethereum/go-ethereum/attack/utils"
 
 
@@ -97,6 +98,7 @@ func latest(chainType utils.ChainType) *types.Header {
 		fatal(err, "Could not get latest block of", chainType, "chain")
 	}
 	hash := rawdb.ReadHeadHeaderHash(db)
+	//log("Head hash is", hash)
 	number := rawdb.ReadHeaderNumber(db, hash)
 	header := rawdb.ReadHeader(db, hash, *number)
 	return header
@@ -120,6 +122,15 @@ func getHeaderByNumber(chainType utils.ChainType, number uint64) *types.Header {
 	hash := rawdb.ReadCanonicalHash(db, number)
 	header := rawdb.ReadHeader(db, hash, number)
 	return header
+}
+
+func getHashByNumber(chainType utils.ChainType, number uint64) common.Hash {
+	db, err := getChainDatabase(chainType)
+	if err != nil {
+		fatal(err, "Could not get hash of block", number, "of", chainType, "chain")
+	}
+	hash := rawdb.ReadCanonicalHash(db, number)
+	return hash
 }
 
 func getTd(chainType utils.ChainType) *big.Int {

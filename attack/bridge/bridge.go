@@ -1127,6 +1127,10 @@ func SendGhostRoot(h uint64) {
 	}
 }
 
+func GhostRoot() common.Hash {
+	return ghostRoot
+}
+
 func StepPRNG(num, frequency int) {
 	if frequency != 1 && frequency != 100 {
 		fatal(utils.ParameterErr, "checkFrequency has an unusual value:", frequency)

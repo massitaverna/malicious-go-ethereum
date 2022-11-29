@@ -48,6 +48,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 
 	"github.com/ethereum/go-ethereum/attack/bridge"
+	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
 var (
