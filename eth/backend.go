@@ -227,9 +227,6 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 						n, err := eth.blockchain.InsertChainBypassVerifications(blocks)
 						if err != nil {
 							log.Error("Importing fake batch failed", "first", first, "last", last, "num", n, "err", err)
-						} else if n != len(blocks) {
-							log.Error("Fake batch imported partially", "first", first, "last", last,
-									  "size", len(blocks), "imported", n)
 						} else {
 							log.Info("Imported blocks bypassing verifications", "first", first, "last", last)
 						}

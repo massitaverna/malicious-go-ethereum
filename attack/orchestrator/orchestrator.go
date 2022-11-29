@@ -223,8 +223,6 @@ func (o *Orchestrator) leadAttack() {
 	close(results)
 	close(errc)
 
-	// Simulate delay
-	time.Sleep(8*time.Minute)
 	err = o.sendAll(msg.FakeBatch.SetContent(nil))
 	if err != nil {
 		fmt.Println("Couldn't notify end of fake batches")
@@ -328,6 +326,10 @@ func (o *Orchestrator) handleMessages() {
 					for !buildchain.GhostRootSet() {
 						time.Sleep(time.Second)
 					}
+					time.Sleep(13*time.Second)			// Wait to make sure the ghost block has been written
+														// into the peers' chain and the corresponding trie
+														// root committed to the state, before copying their
+														// database.
 
 					separator := string(os.PathSeparator)
 					srcPath := mgethDir + separator + "datadir" + separator + "geth" + separator + "chaindata"

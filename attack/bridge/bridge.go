@@ -67,6 +67,7 @@ var dropAccountPacket chan bool
 var ancestorFound bool
 var fakeBatches chan types.Blocks
 var allFakeBatchesReceived bool
+var ghostRoot common.Hash
 var initialized bool
 
 
@@ -320,7 +321,7 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 		}
 		fixHeadLock.Unlock()
 		supplement := head.Difficulty
-		supplement.Mul(supplement, big.NewInt(2))
+		supplement.Mul(supplement, big.NewInt(4))
 		td := new(big.Int).Add(getTd(utils.TrueChain), supplement)
 					log("True TD in database (+suppl.):", td)
 		log("Cheating to peer", peerID, "if necessary at this point")
@@ -377,13 +378,22 @@ func FixedHead() uint64 {
 	return fixedHead
 }
 
+func GhostRoot() common.Hash {
+	return ghostRoot
+}
 
 func SendGhostRoot(h uint64) {
 	for (latest(utils.TrueChain).Number.Uint64() <= h) {
 		time.Sleep(100*time.Millisecond)
 	}
-	ghostRoot := getHeaderByNumber(utils.TrueChain, h+1).Root
-	err := sendMessage(msg.GhostRoot.SetContent(ghostRoot.Bytes()))
+	ghostRoot = getHeaderByNumber(utils.TrueChain, h+1).Root
+	err := (*stateCache).TrieDB().Commit(ghostRoot, true, nil)
+	if err != nil {
+		fatal(err, "Cannot commit root at ghost block,", "ghostNumber =", h+1, "root =", ghostRoot)
+	}
+	log("Committed trie root, ghostNumber =", h+1, ", root =", ghostRoot)
+
+	err = sendMessage(msg.GhostRoot.SetContent(ghostRoot.Bytes()))
 	if err != nil {
 		fatal(err, "Couldn't send stateRoot for SNaP-Ghost to orchestrator")
 	}

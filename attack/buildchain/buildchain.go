@@ -275,8 +275,14 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		stateDb := state.NewDatabase(stateLeveldbWrapper)
 		ethState, err = state.New(genesisHeader.Root, stateDb, nil)
 	} else {
+		var root common.Hash
+		if ghostAttack {
+			root = ghostRoot
+		} else {
+			root = originalHead.Root
+		}
 		stateDb := state.NewDatabase(chainDb)
-		ethState, err = state.New(originalHead.Root, stateDb, nil)
+		ethState, err = state.New(root, stateDb, nil)
 	}
 	if err != nil {
 		fmt.Println("Could not create an Ethereum state")
@@ -387,8 +393,11 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 		// Use the first onlyRewardsBlocks blocks to just generate block rewards,
 		// while the following ones to create accounts as well.
 		if i <= onlyRewardsBlocks || chainType != utils.TrueChain {
-			block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
-		
+
+			// In this cases, we do something different (see below)
+			if !(i <= 2 && chainType == utils.FakeChain && ghostAttack) {
+				block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
+			}
 		// Transfer some wei to many accounts.
 		} else {
 			numTxs := int(numAccounts) / (length-onlyRewardsBlocks)
@@ -413,13 +422,38 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			return err
 		}
 
-		// Set the stateRoot to the ghostRoot if this is the first block
+		// Set the stateRoot to the ghostRoot if this is the first block, and make sure the state is not altered
+		// here because malicious peers must be able to get/compute it.
 		if i == 1 && chainType == utils.FakeChain && ghostAttack {
-			tempBody := block.Body()
-			tempHdr := block.Header()
-			tempHdr.Root = ghostRoot
+			ghostNumber := originalHead.Number.Uint64()+1
+			ghostHash := rawdb.ReadCanonicalHash(chainDb, ghostNumber)
+			ghostBlock := rawdb.ReadBlock(chainDb, ghostHash, ghostNumber)
+			if ghostBlock.Root() != ghostRoot {
+				fmt.Println("ghostRoot:", ghostRoot)
+				fmt.Println("ghostBlock.Root:", ghostBlock.Root)
+				return fmt.Errorf("Inconsistency between ghostRoot and ghostBlock")
+			}
+			fmt.Println("ghostRoot:", ghostRoot)
+
+			tempBody := ghostBlock.Body()
+			tempHdr := ghostBlock.Header()
+			tempHdr.Time = lastHeader.Time + uint64(timestampDeltasMap[i+offset])
+			tempHdr.Difficulty = ethash.CalcDifficulty(chainConfig, lastHeader.Time + uint64(timestampDeltasMap[i+offset]), lastHeader)
+			// Arbitrary extra data to make sure ghostBlock is different from canonical one.
+			tempHdr.Extra = utils.GhostExtra[:]
 			block = types.NewBlockWithHeader(tempHdr).WithBody(tempBody.Transactions, tempBody.Uncles)
-			fmt.Printf("Block %d modified with ghost stateRoot\n", block.NumberU64())
+			fmt.Printf("Block %d modified as ghost block\n", block.NumberU64())
+		}
+		// Arbitrary, invalid modification to the state, to show that snap victims do not validate the state.
+		// Specifically, we add utils.FakeMoney ether to address utils.AdversaryAddress.
+		if i == 2 && chainType == utils.FakeChain && ghostAttack {
+			ethState.AddBalance(utils.AdversaryAddress, utils.FakeMoney)
+			block, err = engine.FinalizeAndAssemble(blockchain, currHeader, ethState, nil, nil, nil)
+			if err != nil {
+				fmt.Println("Couldn't finalize block")
+				return err
+			}
+			fmt.Printf("\nMalicious invalid state included into block %d\n", block.NumberU64())
 		}
 		// Seal the block if we are not building the prediction chain or
 		// we are not in the first 50 blocks of the last full batch

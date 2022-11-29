@@ -48,6 +48,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/beacon"
 
 	"github.com/ethereum/go-ethereum/attack/bridge"
+	"github.com/ethereum/go-ethereum/attack/utils"
 )
 
 var (
@@ -1463,11 +1464,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 	var abort chan<- struct{}
 	var results <-chan error
 	if noChecks != nil && noChecks[0] {
-		ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
-		if !ok {
-			log.Crit("Cannot type assert consensus engine to Ethash engine")
+		if _, ok := bc.engine.(*ethash.Ethash); !ok {
+			ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
+			if !ok {
+				log.Crit("Cannot type assert consensus engine to Ethash engine")
+			}
+			abort, results = ethashEngine.VerifyHeadersNoFutureCheck(bc, headers, seals)
+		} else {
+			abort, results = bc.engine.(*ethash.Ethash).VerifyHeadersNoFutureCheck(bc, headers, seals)
 		}
-		abort, results = ethashEngine.VerifyHeadersNoFutureCheck(bc, headers, seals)
 	} else {
 		abort, results = bc.engine.VerifyHeaders(bc, headers, seals)
 	}
@@ -1657,6 +1662,17 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 					}
 				}(time.Now(), followup, throwaway, &followupInterrupt)
 			}
+		}
+
+		// In our attack, the adversary modifies the state out of the EVM mechanics only at the
+		// block following the ghost block, and it does so by creating utils.FakeMoney ether.
+		// In order to prevent malicious peers from incurring into a 'missing trie node' error,
+		// they perform here this state alteration as well.
+		var parentExtra [32]byte
+		copy(parentExtra[:], parent.Extra)
+		if bridge.GhostRoot() == parent.Root && parentExtra == utils.GhostExtra {
+			log.Warn("State modification out of EVM mechanics")
+			statedb.AddBalance(utils.AdversaryAddress, utils.FakeMoney)
 		}
 
 		// Process block using the parent state as reference point
