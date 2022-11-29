@@ -56,6 +56,12 @@ var (
 																// For a real attack, this would be ca. 415*D0 (2hrs).
 
 	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
+
+	oneEth = new(big.Int).Mul(big.NewInt(1000000000), big.NewInt(1000000000))
+	FakeMoney = new(big.Int).Mul(oneEth, big.NewInt(5000)) 	// 5000 ETH
+	AdversaryAddress = common.HexToAddress("0x0000000000000000000000000000000000000003")
+	GhostExtra = [32]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 1}
+		// Used by malicious peers to identify at which block FakeMoney must be added to AdversaryAddress out of the EVM mechanics.
 )
 
 func (phase AttackPhase) ToChainType() ChainType {

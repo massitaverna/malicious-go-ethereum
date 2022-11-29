@@ -1463,11 +1463,15 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 	var abort chan<- struct{}
 	var results <-chan error
 	if noFutureCheck != nil && noFutureCheck[0] {
-		ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
-		if !ok {
-			log.Crit("Cannot type assert consensus engine to Ethash engine")
+		if _, ok := bc.engine.(*ethash.Ethash); !ok {
+			ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
+			if !ok {
+				log.Crit("Cannot type assert consensus engine to Ethash engine")
+			}
+			abort, results = ethashEngine.VerifyHeadersNoFutureCheck(bc, headers, seals)
+		} else {
+			abort, results = bc.engine.(*ethash.Ethash).VerifyHeadersNoFutureCheck(bc, headers, seals)
 		}
-		abort, results = ethashEngine.VerifyHeadersNoFutureCheck(bc, headers, seals)
 	} else {
 		abort, results = bc.engine.VerifyHeaders(bc, headers, seals)
 	}
