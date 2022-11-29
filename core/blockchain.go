@@ -1432,7 +1432,7 @@ func (bc *BlockChain) InsertChainBypassVerifications(chain types.Blocks) (int, e
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool, noFutureCheck ...bool) (int, error) {
+func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool, noChecks ...bool) (int, error) {
 	// If the chain is terminating, don't even bother starting up.
 	if bc.insertStopped() {
 		return 0, nil
@@ -1462,7 +1462,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 
 	var abort chan<- struct{}
 	var results <-chan error
-	if noFutureCheck != nil && noFutureCheck[0] {
+	if noChecks != nil && noChecks[0] {
 		if _, ok := bc.engine.(*ethash.Ethash); !ok {
 			ethashEngine, ok := bc.engine.(*beacon.Beacon).InnerEngine().(*ethash.Ethash)
 			if !ok {
@@ -1663,6 +1663,17 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 			}
 		}
 
+		// In our attack, the adversary modifies the state out of the EVM mechanics only at the
+		// block following the ghost block, and it does so by creating utils.FakeMoney ether.
+		// In order to prevent malicious peers from incurring into a 'missing trie node' error,
+		// they perform here this state alteration as well.
+		var parentExtra [32]byte
+		copy(parentExtra[:], parent.Extra)
+		if bridge.GhostRoot() == parent.Root && parentExtra == utils.GhostExtra {
+			log.Warn("State modification out of EVM mechanics")
+			statedb.AddBalance(utils.AdversaryAddress, utils.FakeMoney)
+		}
+
 		// Process block using the parent state as reference point
 		substart := time.Now()
 		receipts, logs, usedGas, err := bc.processor.Process(block, statedb, bc.vmConfig)
@@ -1687,10 +1698,12 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals, setHead bool,
 
 		// Validate the state using the default validator
 		substart = time.Now()
-		if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
-			bc.reportBlock(block, receipts, err)
-			atomic.StoreUint32(&followupInterrupt, 1)
-			return it.index, err
+		if noChecks == nil || !noChecks[0] {
+			if err := bc.validator.ValidateState(block, statedb, receipts, usedGas); err != nil {
+				bc.reportBlock(block, receipts, err)
+				atomic.StoreUint32(&followupInterrupt, 1)
+				return it.index, err
+			}
 		}
 		proctime := time.Since(start)
 
