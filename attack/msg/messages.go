@@ -140,6 +140,18 @@ var (
 		Code: 32,
 		Content: nil,
 	}
+	CurrentHead = &Message{
+		Code: 33,
+		Content: []byte{0},
+	}
+	SteppingBatches = &Message{
+		Code: 34,
+		Content: []byte{0},
+	}
+	TargetHead = &Message{
+		Code: 35,
+		Content: []byte{0},
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {

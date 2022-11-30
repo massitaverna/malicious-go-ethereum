@@ -17,10 +17,8 @@ func main() {
 	shortPrediction := flag.Bool("short-prediction", false, "Only leak 3 bits (and assume seed is 1). Useful for testing purposes")
 	overrideSeed := flag.Int("override-seed", -1, "Override leaked seed with specified one. Negative values do not override it")
 	mode := flag.String("mode", "simulation", "Run the attack either on the real or simulated Ethereum world (values: \"real\" or \"simulation\"")
-	Tm := flag.Int("time", -1, "Time for mining the fake segment")
 	fraction := flag.Float64("fraction", 0, "Fraction of the total network mining power controlled by the adversary")
 	honestHashrate := flag.Float64("honest-hashrate", -1, "The honest, total network mining power (in [H/s]; -1 disables hashrate limiting)")
-	ghostAttack := flag.Bool("ghost", false, "Runs a SNaP-Ghost attack insead of a standard SNaP attack")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
@@ -33,10 +31,9 @@ func main() {
 		ShortPrediction: *shortPrediction,
 		OverriddenSeed: *overrideSeed,
 		AtkMode: *mode,
-		Tm: *Tm,
 		Fraction: *fraction,
 		HonestHashrate: *honestHashrate,
-		GhostAttack: *ghostAttack,
+		GhostAttack: true,
 	}
 	orch.Start(cfg)
 	//orch.Wait()							// Calling Wait() would cause a deadlock if errc was not buffered,
