@@ -181,7 +181,8 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 
 	// Victim must have to sync yet
 	predictionTD := getTd(utils.PredictionChain)
-	if td.Cmp(predictionTD) > 0 {
+	if victimID=="" && td.Cmp(predictionTD) > 0 {
+		log("Ignoring victim", vID, "because already syncing/synced")
 		return
 	}
 
