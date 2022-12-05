@@ -2,10 +2,6 @@ package buildchain
 
 import (
 	"fmt"
-	"os"
-	"bufio"
-	"errors"
-	mrand "math/rand"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/attack/utils"
@@ -42,7 +38,9 @@ func SetHashrateLimit(limit int64) {
 func SetMgethDir(path string) {
 	mgethDir = path
 }
-
+func MgethDirSet() bool {
+	return mgethDir != ""
+}
 func SetSeals(m map[int]bool) {
 	sealsMap = m
 }
@@ -130,7 +128,7 @@ func GenerateBuildParameters(x, y, offset int) *BuildParameters {
 	amount := utils.BatchSize - x - 1 + utils.MinFullyVerifiedBlocks
 	for i := offset+1; i <= offset+amount; i++ {
 		bp.SealsMap[i] = false
-		if i == offset + y - x + 1 || i == offset - x + utils.BatchSize {
+		if i == offset - x + y || i == offset - x + utils.BatchSize - 1 {
 			bp.SealsMap[i] = true
 			fmt.Printf("Marking block %d for sealing\n", i)
 		} else if i > amount + offset - utils.MinFullyVerifiedBlocks {
@@ -156,7 +154,7 @@ func BuildParametersForTesting(x, y, offset int) *BuildParameters {
 	amount := utils.BatchSize - x - 1 + utils.MinFullyVerifiedBlocks
 	for i := offset+1; i <= offset+amount; i++ {
 		bp.SealsMap[i] = false
-		if i == offset + y - x + 1 || i == offset - x + utils.BatchSize {
+		if i == offset - x + y || i == offset - x + utils.BatchSize - 1 {
 			bp.SealsMap[i] = true
 			fmt.Printf("Marking block %d for sealing\n", i)
 		} else if i > amount + offset - utils.MinFullyVerifiedBlocks {

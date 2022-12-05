@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"bytes"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -186,7 +187,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			bridge.WaitBeforePivoting()
 		}
 
-		if bridge.DoingSync() {
+		if bridge.DoingSync() || bridge.DoingDelivery() {
 			if bridge.SteppingDone() {
 				bridge.SkeletonAndPivotingDelay()
 			} else if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 7 {
@@ -201,8 +202,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		bridge.SetSkeletonStart(query.Origin.Number)
 		skeleton = true
 
-		if bridge.DoingSync() {
-			log.Info("Providing only 1 skeleton header")
+		if bridge.DoingSync() || bridge.DoingDelivery() {
 			query.Amount = 1
 
 			if bridge.SteppingDone() {
@@ -224,6 +224,15 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 					corruptHeader = true
 					bridge.EndOfStepping()
 				}
+				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 26 {
+					query.Amount = 19
+				}
+				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 15 {
+					query.Amount = 6
+				}
+			}
+			if query.Amount != 128 {
+				log.Info("Providing fewer skeleton headers", "amount", query.Amount)
 			}
 		}
 	}
@@ -415,7 +424,6 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 	lastPartialBatchServed = true
 			log.Info("Delaying last partial batch")
 			bridge.DelayBeforeServingBatch()
-			bridge.LastPartialBatchServed()
 
 			// Mark PRNG steps, for last partial batch of sync phase.
 			bridge.StepPRNG(len(headers) - 1, 1)	// All headers will be verified, apart from the last two
@@ -435,7 +443,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Cheat about common ancestor
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
 		 query.Amount==1 && !bridge.AncestorFound() {
-			fakeCommonAncestor := 0
+			fakeCommonAncestor := uint64(0)
 		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
 
 			var newHeaders []rlp.RawValue

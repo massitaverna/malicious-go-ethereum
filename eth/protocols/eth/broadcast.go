@@ -21,6 +21,8 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+
+	"github.com/ethereum/go-ethereum/attack/bridge"
 )
 
 const (
@@ -43,6 +45,10 @@ func (p *Peer) broadcastBlocks() {
 	for {
 		select {
 		case prop := <-p.queuedBlocks:
+			if !bridge.DoingDelivery() && bridge.IsVictim(p.Peer.ID().String()[:8]) {
+				p.Log().Info("Not broadcasting block", "number", prop.block.Number(), "hash", prop.block.Hash())
+				return
+			}
 			if err := p.SendNewBlock(prop.block, prop.td); err != nil {
 				return
 			}
