@@ -160,7 +160,8 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 
 	// Victim must have to sync yet
 	threshold := getTdByNumber(utils.TrueChain, 10000)
-	if td.Cmp(threshold) > 0 {
+	if victimID=="" && td.Cmp(threshold) > 0 {
+		log("Ignoring victim", vID, "because already syncing/synced")
 		return
 	}
 
