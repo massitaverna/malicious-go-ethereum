@@ -363,6 +363,7 @@ func (o *Orchestrator) leadAttack() {
 	*/
 	if o.honestHashrate >= 0 {
 		buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
+		fmt.Println("Simulating f =", o.fraction)
 	} else {
 		buildchain.SetHashrateLimit(-1)
 	}
