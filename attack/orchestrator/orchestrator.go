@@ -73,6 +73,7 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 
 	if cfg.HonestHashrate >= 0 {
 		buildchain.SetHashrateLimit(int64(math.Round(cfg.Fraction * cfg.HonestHashrate)))
+		fmt.Println("Simulating f =", cfg.Fraction)
 	} else {
 		buildchain.SetHashrateLimit(-1)
 	}
