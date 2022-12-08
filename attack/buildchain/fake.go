@@ -118,7 +118,7 @@ func GenerateBuildParameters(Tm int, filename string, prng *mrand.Rand) (*BuildP
 }
 */
 
-func GenerateBuildParameters(x, y, offset int) *BuildParameters {
+func GenerateBuildParameters(x, y, offset, time int) *BuildParameters {
 	bp := &BuildParameters{
 		NumBatches: 0,
 		SealsMap: make(map[int]bool),
@@ -135,9 +135,10 @@ func GenerateBuildParameters(x, y, offset int) *BuildParameters {
 			bp.SealsMap[i] = true
 		}
 
-		bp.TimestampDeltasMap[i] = 900
-		if i > amount + offset - utils.MinFullyVerifiedBlocks + 10 {
-			bp.TimestampDeltasMap[i] = 9
+		k := (time - 9*amount)/891
+		bp.TimestampDeltasMap[i] = 9
+		if i <= offset + k {
+			bp.TimestampDeltasMap[i] = 900
 		}
 	}
 

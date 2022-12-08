@@ -50,7 +50,7 @@ type Orchestrator struct {
 	rand *mrand.Rand
 	prngSteps map[int]int
 	prngTuned chan struct{}
-	Tm int
+	miningTime int
 	fraction float64
 	honestHashrate float64
 	ghostAttack bool
@@ -66,7 +66,7 @@ type OrchConfig struct {
 	ShortPrediction bool
 	OverriddenSeed int
 	AtkMode string
-	Tm int
+	MiningTime int
 	Fraction float64
 	HonestHashrate float64
 	GhostAttack bool
@@ -139,6 +139,7 @@ func (o *Orchestrator) Start(cfg *OrchConfig) {
 
 	o.fraction = cfg.Fraction
 	o.honestHashrate = cfg.HonestHashrate
+	o.miningTime = cfg.MiningTime
 
 	o.ghostAttack = cfg.GhostAttack
 
@@ -352,15 +353,6 @@ func (o *Orchestrator) leadAttack() {
 	*/
 
 
-	//TODO: RE-ENABLE block below for non-testing
-	/*
-	bp, err := buildchain.GenerateBuildParameters(o.Tm, outputFile, o.rand)
-	if err != nil {
-		fmt.Println("Could not generate build parameters for fake chain")
-		o.errc <- err
-		return
-	}
-	*/
 	if o.honestHashrate >= 0 {
 		buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
 		fmt.Println("Simulating f =", o.fraction)
@@ -368,6 +360,7 @@ func (o *Orchestrator) leadAttack() {
 		buildchain.SetHashrateLimit(-1)
 	}
 	// We change bp only for testing purposes. Remove the line below later on.
+	//bp := buildchain.GenerateBuildParameters(o.blockX, o.blockY, o.targetHead, o.miningTime)
 	bp := buildchain.BuildParametersForTesting(o.blockX, o.blockY, o.targetHead)
 
 	buildchain.SetSeals(bp.SealsMap)

@@ -19,6 +19,7 @@ func main() {
 	mode := flag.String("mode", "simulation", "Run the attack either on the real or simulated Ethereum world (values: \"real\" or \"simulation\"")
 	fraction := flag.Float64("fraction", 0, "Fraction of the total network mining power controlled by the adversary")
 	honestHashrate := flag.Float64("honest-hashrate", -1, "The honest, total network mining power (in [H/s]; -1 disables hashrate limiting)")
+	miningTime := flag.Int("time", 0, "Available time for mining")
 	flag.Parse()
 	errc := make(chan error, 1)				// Channel to signal the first error or success
 
@@ -33,6 +34,7 @@ func main() {
 		AtkMode: *mode,
 		Fraction: *fraction,
 		HonestHashrate: *honestHashrate,
+		MiningTime: *miningTime,
 		GhostAttack: true,
 	}
 	orch.Start(cfg)
