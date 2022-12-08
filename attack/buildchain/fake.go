@@ -166,7 +166,7 @@ func BuildParametersForTesting(x, y, offset int) *BuildParameters {
 			}
 		}
 
-		bp.TimestampDeltasMap[i] = 9
+		bp.TimestampDeltasMap[i] = 900
 	}
 
 	return bp
