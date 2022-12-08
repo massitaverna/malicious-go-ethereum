@@ -362,6 +362,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	engine.SetThreads(0)
 	resultsCache := make(types.Blocks, 0)
 
+	start := time.Now()
 	for i := 1; i <= length; i++ {
 		if _, tExists := timestampDeltasMap[i+offset]; !tExists {
 			return fmt.Errorf("Timestamp delta value for block number %d does not exist", i+offset)
@@ -502,6 +503,7 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 			fmt.Print(numDone/int(math.Ceil(float64(length)/100)), "%... ")
 		}
 	}
+	fmt.Println("Elapsed:", common.PrettyDuration(time.Since(start)))
 	rawdb.WriteHeadHeaderHash(chainDb, lastHeader.Hash())
 	rawdb.WriteHeadBlockHash(chainDb, lastHeader.Hash())
 
