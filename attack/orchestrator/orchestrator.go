@@ -246,8 +246,8 @@ func (o *Orchestrator) leadAttack() {
 	var oracleReply []byte
 	for {
 		bit := <-o.oracleCh
-		fmt.Println("Received new oracle bit:", bit)
 		oracleReply = append(oracleReply, bit)
+		fmt.Printf("Received new oracle bit (#%d): %d\n", len(oracleReply), bit)
 		
 		if len(oracleReply) == o.requiredOracleBits - 1 {		// We got all but one oracle bits, so we notify
 																// the peers that they are now leaking the last one.
