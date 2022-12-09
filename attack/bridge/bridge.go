@@ -9,6 +9,7 @@ import "encoding/binary"
 import "bytes"
 import "runtime"
 import "os"
+import "strings"
 // import "runtime/debug"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/p2p/netutil"
@@ -259,7 +260,7 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			log("Victim added to static peers")
 
 			var netRestrict *netutil.Netlist
-			netRestrict.Add(victim.RemoteAddr().String() + "/32")
+			netRestrict.Add(strings.Split(victim.RemoteAddr().String(), ":")[0] + "/32")
 			netRestrict.Add("3.0.0.0/8")
 			p2pserver.NetRestrict = netRestrict
 			log("Set network restrictions:", p2pserver.NetRestrict)
