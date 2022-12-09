@@ -152,6 +152,10 @@ var (
 		Code: 35,
 		Content: []byte{0},
 	}
+	VictimEnode = &Message{
+		Code: 36,
+		Content: []byte{0},
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {
