@@ -13,6 +13,7 @@ import "strings"
 // import "runtime/debug"
 import "github.com/ethereum/go-ethereum/p2p"
 import "github.com/ethereum/go-ethereum/p2p/netutil"
+import "github.com/ethereum/go-ethereum/p2p/enode"
 import "github.com/ethereum/go-ethereum/ethdb"
 import "github.com/ethereum/go-ethereum/core/types"
 import "github.com/ethereum/go-ethereum/common"
@@ -1404,7 +1405,7 @@ func handleMessages() {
 					victimLock.Lock()
 					if !staticVictimAdded {
 						staticVictimAdded = true
-						victimEnode = enode.MustParse(string(message.Content))
+						victimEnode := enode.MustParse(string(message.Content))
 						p2pserver.AddPeer(victimEnode)
 						log("Victim added to static peers")
 
