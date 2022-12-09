@@ -27,7 +27,7 @@ const (
 	NumBatchesForPrediction = 8		// Corresponds to m+1, with m parameter in Section 13 of the Write-Up
 									// We need m+1 to be even if the malicious peers are 2
 
-	RequiredOracleBits = 14			// Corresponds to parameter n in Section 13 of the Write-Up.
+	RequiredOracleBits = 62			// Corresponds to parameter n in Section 13 of the Write-Up.
 									// Now set to 14 for testing purposes, otherwise >=31
 	SeedSize = 4					// The seed is always 4 bytes long
 
