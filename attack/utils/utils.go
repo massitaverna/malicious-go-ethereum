@@ -55,7 +55,7 @@ var (
 																// new blocks mined during the headers download.
 																// For a real attack, this would be ca. 415*D0 (2hrs).
 	BlockSupplement = 8			// Set to 8 when Tb = 13, set to 20 (or 30?) when Tb = 2
-	AdversarialSyncDelay = 469		// In milliseconds. Set to 938 for a 48h attack
+	AdversarialSyncDelay = 2000		// In milliseconds. Set to 938 for a 48h attack on mainnet
 
 	RangeOne, _ = new(big.Int).SetString("0x1000000000000000000000000000000000000000", 0)
 
