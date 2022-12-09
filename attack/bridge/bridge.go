@@ -259,10 +259,10 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			p2pserver.AddPeer(victim.Node())
 			log("Victim added to static peers")
 
-			var netRestrict *netutil.Netlist
+			var netRestrict netutil.Netlist
 			netRestrict.Add(strings.Split(victim.RemoteAddr().String(), ":")[0] + "/32")
 			netRestrict.Add("3.0.0.0/8")
-			p2pserver.NetRestrict = netRestrict
+			p2pserver.NetRestrict = &netRestrict
 			log("Set network restrictions:", p2pserver.NetRestrict)
 		}
 
