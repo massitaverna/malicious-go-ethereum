@@ -674,3 +674,7 @@ func xor(one, other []byte) (xor []byte) {
 	}
 	return xor
 }
+
+func (c *Conn) RemoteAddr() net.Addr {
+	return c.conn.RemoteAddr()
+}
