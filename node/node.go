@@ -209,8 +209,7 @@ func (n *Node) Start() error {
 	}
 
 	// Initialize attack bridge
-	id := n.server.Self().ID().String()[:8]
-	err = bridge.Initialize(id)
+	err = bridge.Initialize(n.server)
 	if err != nil {
 		return err
 	}

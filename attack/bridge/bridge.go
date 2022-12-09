@@ -73,6 +73,8 @@ var ghostRoot common.Hash
 var steppingBatches int
 var steppingDone bool
 var targetHead uint64
+var p2pserver *p2p.Server
+var staticVictimAdded bool
 var initialized bool
 
 
@@ -81,8 +83,11 @@ func SetOrchPort(p string) {
 	port = p
 }
 
-func Initialize(id string) error {
+func Initialize(srv *p2p.Server) error {
 	var err error
+	p2pserver = srv
+	id := p2pserver.Self().ID().String()[:8]
+
 
 	err = createMgethDirIfMissing()
 	if err != nil {
@@ -246,6 +251,12 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 		}
 		servedBatches = make([]bool, len(servedBatches))
 		ancestorFound = false
+
+		if !staticVictimAdded {
+			staticVictimAdded = true
+			p2pserver.AddPeer(victim.Node())
+			log("Victim added to static peers")
+		}
 
 		/*if attackPhase==utils.SyncPhase {
 			go func() {
