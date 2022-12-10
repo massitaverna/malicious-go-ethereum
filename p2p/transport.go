@@ -43,16 +43,12 @@ const (
 	discWriteTimeout = 1 * time.Second
 )
 
-var DelayMessage bool
-var Victim *Peer
-
 // rlpxTransport is the transport used by actual (non-test) connections.
 // It wraps an RLPx connection with locks and read/write deadlines.
 type rlpxTransport struct {
 	rmu, wmu sync.Mutex
 	wbuf     bytes.Buffer
 	conn     *rlpx.Conn
-	delayed chan Msg
 }
 
 func newRLPX(conn net.Conn, dialDest *ecdsa.PublicKey) transport {
@@ -86,14 +82,6 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 
-	if DelayMessage && Victim != nil && t.conn.RemoteAddr().String() == Victim.RemoteAddr().String() {
-		if t.delayed == nil {
-			t.delayed = make(chan Msg, 1)
-		}
-		t.delayed <- msg
-		return nil
-	}
-
 	// Copy message data to write buffer.
 	t.wbuf.Reset()
 	if _, err := io.CopyN(&t.wbuf, msg.Payload, int64(msg.Size)); err != nil {
@@ -118,15 +106,6 @@ func (t *rlpxTransport) WriteMsg(msg Msg) error {
 }
 
 func (t *rlpxTransport) close(err error) {
-	select {
-	case delayedMsg := <-t.delayed:
-		err := t.WriteMsg(delayedMsg)
-		if err != nil {
-			panic(err)
-		}
-	default:
-	}
-
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 

