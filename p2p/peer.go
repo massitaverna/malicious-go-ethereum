@@ -296,7 +296,11 @@ loop:
 				p.dropLock.Lock()
 				if p.mustNotifyDrop {
 					p.mustNotifyDrop = false
+					log.Info("Sending on Dropped")
 					p.Dropped <- true
+					log.Info("Sent on Dropped")
+				} else {
+					log.Warn("mustNotifyDrop is false")
 				}
 				p.dropLock.Unlock()
 			} else {
