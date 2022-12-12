@@ -556,6 +556,20 @@ func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 	fd, err := d.dialer.Dial(cntxt, t.dest)
 	if err != nil {
 		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanupDialErr(err))
+		go func() {
+			for {
+				if NoNewConnections != nil && *NoNewConnections {
+					time.Sleep(1*time.Second)
+					continue
+				}
+				log.Info("Explicitly retrying victim dial")
+				err := t.dial(d, dest)
+				if err == nil {
+					log.Info("Explicit victim dial completed")
+					break
+				}
+			}
+		}()
 		return &dialError{err}
 	}
 	mfd := newMeteredConn(fd, false, &net.TCPAddr{IP: dest.IP(), Port: dest.TCP()})
