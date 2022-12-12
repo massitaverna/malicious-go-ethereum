@@ -79,6 +79,7 @@ var midRollbackDone bool
 var targetHead uint64
 var p2pserver *p2p.Server
 var staticVictimAdded bool
+var ancestorMidPoint int64
 var initialized bool
 
 
@@ -146,6 +147,7 @@ func Initialize(srv *p2p.Server) error {
 	completedRanges = make([]bool, 16)
 	dropAccountPacket = make(chan bool)
 	fakeBatches = make(chan types.Blocks)
+	ancestorMidPoint = -1
 
 	quitCh = make(chan struct{})
 	incoming = make(chan []byte)
@@ -1157,6 +1159,15 @@ func MidRollback() {
 	if err := sendMessage(msg.MidRollback); err != nil {
 		fatal(err, "Could not notify other peer about mid rollback")
 	}
+}
+
+func AncestorMidPoint() uint64 {
+	if ancestorMidPoint == int64(-1) {
+		ancestorMidPoint = int64(steppingBatches * utils.BatchSize / 2)
+	} else {
+		ancestorMidPoint = int64(0)
+	}
+	return uint64(ancestorMidPoint)
 }
 
 func Close() {

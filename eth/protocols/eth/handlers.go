@@ -462,7 +462,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Cheat about common ancestor
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
 		 query.Amount==1 && !bridge.AncestorFound() {
-			fakeCommonAncestor := uint64(0)
+			fakeCommonAncestor := bridge.AncestorMidPoint()
 		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
 
 			var newHeaders []rlp.RawValue
