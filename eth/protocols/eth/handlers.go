@@ -154,7 +154,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
 			// Give more time to peers to reconnect to victim
-			if bridge.DoingPrecition() {
+			if bridge.DoingPrediction() {
 				time.Sleep(3*time.Second)
 			}
 		}
