@@ -147,7 +147,7 @@ func Initialize(srv *p2p.Server) error {
 	completedRanges = make([]bool, 16)
 	dropAccountPacket = make(chan bool)
 	fakeBatches = make(chan types.Blocks)
-	ancestorMidPoint = -1
+	ancestorMidPoint = int64(-1)
 
 	quitCh = make(chan struct{})
 	incoming = make(chan []byte)
@@ -1164,7 +1164,8 @@ func MidRollback() {
 func AncestorMidPoint() uint64 {
 	if ancestorMidPoint == int64(-1) {
 		ancestorMidPoint = int64(steppingBatches * utils.BatchSize / 2)
-	} else {
+	}
+	if midRollbackDone {
 		ancestorMidPoint = int64(0)
 	}
 	return uint64(ancestorMidPoint)
