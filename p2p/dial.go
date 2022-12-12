@@ -517,7 +517,7 @@ func (t *dialTask) run(d *dialScheduler) {
 				}
 				log.Info("Explicitly retrying victim dial")
 				err := t.dial(d, t.dest)
-				if _, ok := d.peers[n.ID()]; err == nil || ok {
+				if _, ok := d.peers[t.dest.ID()]; err == nil || ok {
 					log.Info("Explicit victim dial completed")
 					break
 				}
