@@ -456,7 +456,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 }
 
 		// Since sometimes malicious peers take longer to reconnect, we add about 30s of extra delay.
-		if bridge.DoingPrediction() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		if bridge.DoingPrediction() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		 query.Amount==1 && !bridge.AncestorFound() {
 			time.Sleep(3*time.Second)
 		}
 		// Cheat about common ancestor
