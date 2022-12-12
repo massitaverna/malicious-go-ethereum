@@ -358,6 +358,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if skeleton && bridge.DoingSync() {
 		bridge.StepPRNG(2*len(headers), 100)
 	}
+	if skeleton && bridge.SteppingDone() && !bridge.MidRollbackDone() {
+		bridge.MidRollback()
+		return nil
+	}
 	return headers
 }
 
@@ -436,9 +440,9 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		}
 
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
-		 query.Amount==1 && !bridge.AncestorFound() && !bridge.SteppingDone() {
+		 query.Amount==1 && !bridge.AncestorFound() && !bridge.MidRollbackDone() {
 		 	// Leave enough time to the orchestrator to compute the number of stepping batches
-		 	time.Sleep(1*time.Second)
+		 	time.Sleep(2*time.Second)
 		 }
 		// Cheat about common ancestor
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&

@@ -156,6 +156,10 @@ var (
 		Code: 36,
 		Content: []byte{0},
 	}
+	MidRollback = &Message{
+		Code: 37,
+		Content: nil,
+	}
 )
 
 func (m *Message) SetContent(c []byte) *Message {

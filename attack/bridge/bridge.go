@@ -75,6 +75,7 @@ var allFakeBatchesReceived bool
 var ghostRoot common.Hash
 var steppingBatches int
 var steppingDone bool
+var midRollbackDone bool
 var targetHead uint64
 var p2pserver *p2p.Server
 var staticVictimAdded bool
@@ -1146,6 +1147,17 @@ func EndOfStepping() {
 	avoidVictim = true
 }
 
+func MidRollbackDone() bool {
+	return midRollbackDone
+}
+
+func MidRollback() {
+	midRollbackDone = true
+	if err := sendMessage(msg.MidRollback); err != nil {
+		fatal(err, "Could not notify other peer about mid rollback")
+	}
+}
+
 func Close() {
 	quitLock.Lock()
 	select {
@@ -1418,6 +1430,17 @@ func handleMessages() {
 						log("Set network restrictions:", p2pserver.NetRestrict)
 					}
 					victimLock.Unlock()
+				}()
+			case msg.MidRollback.Code:
+				midRollbackDone = true
+			case msg.GhostRoot.Code:
+				go func() {
+					ghostRoot = common.BytesToHash(message.Content)
+					err := (*stateCache).TrieDB().Commit(ghostRoot, true, nil)
+					if err != nil {
+						fatal(err, "Cannot commit root at ghost block, root =", ghostRoot)
+					}
+					log("Committed trie root, root =", ghostRoot)
 				}()
 
 

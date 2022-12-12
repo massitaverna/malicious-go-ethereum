@@ -547,7 +547,12 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 
 // dial performs the actual connection attempt.
 func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
-	fd, err := d.dialer.Dial(d.ctx, t.dest)
+	cntxt := d.ctx
+	if dest.RemoteAddr().String() == Victim.RemoteAddr.String() {
+		cntxt = context.WithTimeout(d.ctx, 2*time.Second)
+		log.Info("Set timeout to victim dial")
+	}
+	fd, err := d.dialer.Dial(cntxt, t.dest)
 	if err != nil {
 		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanupDialErr(err))
 		return &dialError{err}
