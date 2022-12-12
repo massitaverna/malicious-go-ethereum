@@ -550,7 +550,7 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 	cntxt := d.ctx
 	if dest.String() == Victim.String() {
-		cntxt = context.WithTimeout(d.ctx, 2*time.Second)
+		cntxt, _ = context.WithTimeout(d.ctx, 2*time.Second)
 		log.Info("Set timeout to victim dial")
 	}
 	fd, err := d.dialer.Dial(cntxt, t.dest)
