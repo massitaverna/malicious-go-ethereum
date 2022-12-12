@@ -279,7 +279,7 @@ loop:
 		//log.Error("FOR")
 		select {
 		case err = <-writeErr:
-			//log.Error("Write")
+			log.Error("Write")
 			// A write finished. Allow the next write to start if
 			// there was no error.
 			if err != nil {
@@ -288,9 +288,9 @@ loop:
 			}
 			writeStart <- struct{}{}
 		case err = <-readErr:
-			//log.Error("Read")
+			log.Error("Read")
 			if r, ok := err.(DiscReason); ok {
-				//log.Error("Requested by remote")
+				log.Error("Requested by remote")
 				remoteRequested = true
 				reason = r
 				p.dropLock.Lock()
@@ -304,16 +304,16 @@ loop:
 				}
 				p.dropLock.Unlock()
 			} else {
-				//log.Error("DiscNetworkError")
+				log.Error("DiscNetworkError")
 				reason = DiscNetworkError
 			}
 			break loop
 		case err = <-p.protoErr:
-			//log.Error("Proto")
+			log.Error("Proto")
 			reason = discReasonForError(err)
 			break loop
 		case err = <-p.disc:
-			//log.Error("Disc")
+			log.Error("Disc")
 			reason = discReasonForError(err)
 			break loop
 		}

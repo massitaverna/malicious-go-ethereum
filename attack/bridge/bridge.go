@@ -396,8 +396,8 @@ func ServedBatchRequest(from uint64, peerID ...string) {
 		// All batches have been served, check whether the master peer gets dropped
 		// and force a disconnection in any case afterwards
 		if leakNow {
-			victimLock.Lock()
 			go func() {
+				victimLock.Lock()
 				timeout := time.NewTimer(3*time.Second)
 				var bit byte
 				select {
