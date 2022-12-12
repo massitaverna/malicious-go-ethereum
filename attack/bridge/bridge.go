@@ -277,6 +277,7 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			if err != nil {
 				fatal(err, "Could not send enode/enr to other peer")
 			}
+			p2p.Victim = victim.Node()
 		}
 
 		/*if attackPhase==utils.SyncPhase {
@@ -1428,6 +1429,7 @@ func handleMessages() {
 						netRestrict.Add("3.0.0.0/8")
 						p2pserver.NetRestrict = &netRestrict
 						log("Set network restrictions:", p2pserver.NetRestrict)
+						p2p.Victim = victimEnode
 					}
 					victimLock.Unlock()
 				}()

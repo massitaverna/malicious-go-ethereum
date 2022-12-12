@@ -49,6 +49,7 @@ const (
 )
 
 var NoNewConnections *bool
+var Victim *enode.Node
 
 // NodeDialer is used to connect to nodes in the network, typically by using
 // an underlying net.Dialer but also using net.Pipe in tests.
@@ -548,7 +549,7 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 // dial performs the actual connection attempt.
 func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
 	cntxt := d.ctx
-	if dest.RemoteAddr().String() == Victim.RemoteAddr.String() {
+	if dest.String() == Victim.String() {
 		cntxt = context.WithTimeout(d.ctx, 2*time.Second)
 		log.Info("Set timeout to victim dial")
 	}
