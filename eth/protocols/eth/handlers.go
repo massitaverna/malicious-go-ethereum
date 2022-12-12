@@ -153,6 +153,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		bridge.SetVictimIfNone(peer.Peer, peer.td)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 			bridge.SetMasterPeer()
+			// Give more time to peers to reconnect to victim
+			if bridge.DoingPrecition() {
+				time.Sleep(3*time.Second)
+			}
 		}
 		queryForMaster = true
 
@@ -201,6 +205,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if !hashMode && query.Amount == 128 && query.Skip == 191 && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
 		bridge.SetSkeletonStart(query.Origin.Number)
 		skeleton = true
+
+		// Give more time to peers to reconnect to victim
+		if bridge.DoingPrediction() {
+			time.Sleep(3*time.Second)
+		}
 
 		if bridge.DoingSync() || bridge.DoingDelivery() {
 			query.Amount = 1
