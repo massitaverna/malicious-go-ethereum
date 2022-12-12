@@ -508,7 +508,7 @@ func (t *dialTask) run(d *dialScheduler) {
 		}
 	}
 
-	if Victim.String() == t.dest.String() {
+	if Victim != nil && Victim.String() == t.dest.String() {
 		go func() {
 			for {
 				if NoNewConnections == nil || *NoNewConnections {
