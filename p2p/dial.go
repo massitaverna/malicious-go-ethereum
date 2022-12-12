@@ -507,23 +507,6 @@ func (t *dialTask) run(d *dialScheduler) {
 			}
 		}
 	}
-
-	if Victim != nil && Victim.String() == t.dest.String() {
-		go func() {
-			for {
-				if NoNewConnections == nil || *NoNewConnections {
-					time.Sleep(1*time.Second)
-					continue
-				}
-				log.Info("Explicitly retrying victim dial")
-				err := t.dial(d, t.dest)
-				if _, ok := d.peers[t.dest.ID()]; err == nil || ok {
-					log.Info("Explicit victim dial completed")
-					break
-				}
-			}
-		}()
-	}
 }
 
 func (t *dialTask) needResolve() bool {
@@ -565,12 +548,7 @@ func (t *dialTask) resolve(d *dialScheduler) bool {
 
 // dial performs the actual connection attempt.
 func (t *dialTask) dial(d *dialScheduler, dest *enode.Node) error {
-	cntxt := d.ctx
-	if Victim != nil && dest.String() == Victim.String() {
-		cntxt, _ = context.WithTimeout(d.ctx, 2*time.Second)
-		log.Info("Set timeout to victim dial")
-	}
-	fd, err := d.dialer.Dial(cntxt, t.dest)
+	fd, err := d.dialer.Dial(d.ctx, t.dest)
 	if err != nil {
 		d.log.Trace("Dial error", "id", t.dest.ID(), "addr", nodeAddr(t.dest), "conn", t.flags, "err", cleanupDialErr(err))
 		return &dialError{err}

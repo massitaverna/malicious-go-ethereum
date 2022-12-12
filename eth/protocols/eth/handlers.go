@@ -442,8 +442,14 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
 		 query.Amount==1 && !bridge.AncestorFound() && !bridge.MidRollbackDone() {
 		 	// Leave enough time to the orchestrator to compute the number of stepping batches
+		 	// Or to malicious peer to reconnect to victim after batch stepping.
 		 	time.Sleep(2*time.Second)
 		 }
+
+		// Since sometimes malicious peers take longer to reconnect, we add about 30s of extra delay.
+		if bridge.DoingPrediction() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+			time.Sleep(3*time.Second)
+		}
 		// Cheat about common ancestor
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
 		 query.Amount==1 && !bridge.AncestorFound() {
