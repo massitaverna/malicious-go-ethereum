@@ -300,6 +300,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 
 		if corruptHeader {
+			origin = types.CopyHeader(origin)
 			origin.Time = origin.Time + 1
 			corruptHeader = false
 			log.Info("Corrupting header", "number", origin.Number)
