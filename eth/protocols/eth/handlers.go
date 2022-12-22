@@ -194,7 +194,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.DoingSync() || bridge.DoingDelivery() {
 			if bridge.SteppingDone() {
 				bridge.SkeletonAndPivotingDelay()
-			} else if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 7 {
+			} else if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 10 {
 				time.Sleep(1*time.Second)
 			}
 		}

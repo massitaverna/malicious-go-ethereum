@@ -1449,6 +1449,7 @@ func handleMessages() {
 				}()
 			case msg.MidRollback.Code:
 				midRollbackDone = true
+				log("Set midRollback = true")
 			case msg.GhostRoot.Code:
 				go func() {
 					ghostRoot = common.BytesToHash(message.Content)
