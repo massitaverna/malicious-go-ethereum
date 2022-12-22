@@ -331,8 +331,8 @@ func BuildChain(chainType utils.ChainType, length int, overwrite bool, numAccts 
 	case utils.PredictionChain:
 		startOfLastBatch := length - length%utils.BatchSize - utils.BatchSize
 		for i := 1; i <= length; i++ {
-			//sealsMap[i] = !(startOfLastBatch < i && i <= startOfLastBatch + 50)
-			sealsMap[i] = !(startOfLastBatch < i && i <= startOfLastBatch + 100)
+			sealsMap[i] = !(startOfLastBatch < i && i <= startOfLastBatch + 50)
+			// sealsMap[i] = !(startOfLastBatch < i && i <= startOfLastBatch + 100)
 			timestampDeltasMap[i] = 13
 		}
 	case utils.TrueChain:
