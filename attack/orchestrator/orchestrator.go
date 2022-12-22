@@ -730,8 +730,7 @@ func (o *Orchestrator) handleMessages() {
 					o.syncCh <- struct{}{}
 
 					content := make([]byte, 4)
-					//binary.BigEndian.PutUint32(content, uint32(C))
-					binary.BigEndian.PutUint32(content, uint32(927))
+					binary.BigEndian.PutUint32(content, uint32(C))
 					err := o.sendAll(msg.SteppingBatches.SetContent(content))
 					if err != nil {
 						fmt.Println("Could not send number of stepping batches to peers")
