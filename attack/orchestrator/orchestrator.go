@@ -360,8 +360,8 @@ func (o *Orchestrator) leadAttack() {
 		buildchain.SetHashrateLimit(-1)
 	}
 	// We change bp only for testing purposes. Remove the line below later on.
-	//bp := buildchain.GenerateBuildParameters(o.blockX, o.blockY, o.targetHead, o.miningTime)
-	bp := buildchain.BuildParametersForTesting(o.blockX, o.blockY, o.targetHead)
+	bp := buildchain.GenerateBuildParameters(o.blockX, o.blockY, o.targetHead, o.miningTime)
+	//bp := buildchain.BuildParametersForTesting(o.blockX, o.blockY, o.targetHead)
 
 	buildchain.SetSeals(bp.SealsMap)
 	buildchain.SetTimestampDeltas(bp.TimestampDeltasMap)
@@ -709,15 +709,16 @@ func (o *Orchestrator) handleMessages() {
 					currentHead := int(binary.BigEndian.Uint64(message.Content))
 					n := int(math.Ceil(float64(currentHead+60)/192.0)) + 1
 					<-o.syncCh		// Wait for PRNG initialisation
+
+					C := 10		// Force C > 10
+					x := 0
+					y := 0
 					for i := 0; i < 2*n; i++ {
 						o.rand.Intn(100)
 					}
-					for i := 0; i < 2*7; i++ {		// Force C > 7
+					for i := 0; i < 2*C; i++ {
 						o.rand.Intn(100)
 					}
-					C := 7
-					x := 0
-					y := 0
 					for (y >= 170 || y-x <= 160) {
 						C++
 						x = o.rand.Intn(100)
@@ -729,7 +730,8 @@ func (o *Orchestrator) handleMessages() {
 					o.syncCh <- struct{}{}
 
 					content := make([]byte, 4)
-					binary.BigEndian.PutUint32(content, uint32(C))
+					//binary.BigEndian.PutUint32(content, uint32(C))
+					binary.BigEndian.PutUint32(content, uint32(927))
 					err := o.sendAll(msg.SteppingBatches.SetContent(content))
 					if err != nil {
 						fmt.Println("Could not send number of stepping batches to peers")

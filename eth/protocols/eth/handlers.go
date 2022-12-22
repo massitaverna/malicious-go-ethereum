@@ -216,27 +216,33 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 
 			if bridge.SteppingDone() {
 				bridge.SkeletonAndPivotingDelay()
+
+				if !bridge.MidRollbackDone() {
+					bridge.MidRollback()
+					time.Sleep(500*time.Millisecond) // Leave some time to the other peer to receive and process msg.MidRollback
+					return nil
+				}
 			}
 
 			if !bridge.SteppingDone() {
 				if int(query.Origin.Number)%192 != 0 {
 					log.Crit("Skeleton not aligned to batch size", "number", query.Origin.Number)
 				}
-				if int(query.Origin.Number)/192 == bridge.SteppingBatches() - 7 {
+				if int(query.Origin.Number)/192 == bridge.SteppingBatches() - 10 {
 					bridge.TerminatingStepping()
 				}
 
-				if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 7 {
-					time.Sleep(1*time.Second)
+				if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 10 {
+					time.Sleep(3*time.Second)
 				}
 				if int(query.Origin.Number)/192 == bridge.SteppingBatches() {
 					corruptHeader = true
 					bridge.EndOfStepping()
 				}
-				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 26 {
+				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 29 {
 					query.Amount = 19
 				}
-				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 15 {
+				if int(query.Origin.Number)/192 < bridge.SteppingBatches() - 18 {
 					query.Amount = 6
 				}
 			}
@@ -367,10 +373,6 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	if skeleton && bridge.DoingSync() {
 		bridge.StepPRNG(2*len(headers), 100)
 	}
-	if skeleton && bridge.SteppingDone() && !bridge.MidRollbackDone() {
-		bridge.MidRollback()
-		return nil
-	}
 	return headers
 }
 
@@ -445,7 +447,8 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 													// So we have len(headers) -2 + 1 calls to the PRNG.
 
 			//bridge.StepPRNG(3, 1)					// Mark last 2 headers in advance (+1 for useless call)
-			bridge.CommitPRNG()
+			
+			//bridge.CommitPRNG()
 		}
 
 		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
@@ -455,9 +458,10 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 	time.Sleep(2*time.Second)
 		 }
 
-		// Since sometimes malicious peers take longer to reconnect, we add about 30s of extra delay.
-		if bridge.DoingPrediction() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
-		 query.Amount==1 && !bridge.AncestorFound() {
+		// Since sometimes malicious peers take longer to reconnect, we add about 30s of extra delay
+		// during prediction. We do the same during the mid rollback.
+		if (bridge.DoingPrediction() || bridge.SteppingDone() && !bridge.MidRollbackDone()) &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
 			time.Sleep(3*time.Second)
 		}
 		// Cheat about common ancestor
