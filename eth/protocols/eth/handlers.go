@@ -452,17 +452,12 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			//bridge.CommitPRNG()
 		}
 
-		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
-		 query.Amount==1 && !bridge.AncestorFound() && !bridge.MidRollbackDone() {
-		 	// Leave enough time to the orchestrator to compute the number of stepping batches
-		 	// Or to malicious peer to reconnect to victim after batch stepping.
-		 	time.Sleep(2*time.Second)
-		 }
-
-		// Since sometimes malicious peers take longer to reconnect, we add about 30s of extra delay
-		// during prediction. We do the same during the mid rollback.
-		if (bridge.DoingPrediction() || bridge.SteppingDone() && !bridge.MidRollbackDone()) &&
-		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
+		// We add delays during ancestor search for the following reasons:
+		// Prediction - Allow enough time to peers to reconnect to the victim
+		// Before batch stepping - Leave (generous) time to orch to compute the number of stepping batches
+		// After stepping, during mid rollback - Allow time to kicked peer to reconnect to the victim
+		if !bridge.MidRollbackDone() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		 query.Amount==1 && !bridge.AncestorFound() {
 			time.Sleep(3*time.Second)
 		}
 		// Cheat about common ancestor
