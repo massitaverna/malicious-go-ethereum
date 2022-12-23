@@ -324,11 +324,14 @@ func (o *Orchestrator) leadAttack() {
 
 	// --- SYNC PHASE ---
 
+	/*
 	// Wait for the master peer which will commit the ghost trie root before asking
 	// the master for its working directory
 	for o.syncOps != o.requiredOracleBits + 2 {
 		time.Sleep(5*time.Second)
 	}
+	*/
+	
 	err := o.send(o.peerset.masterPeer, msg.GetCwd)
 	if err != nil {
 		fmt.Println("Couldn't get current working directory of master peer")
