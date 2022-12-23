@@ -1221,6 +1221,7 @@ func handleMessages() {
 		case messageAsBytes := <-incoming:
 			log("Handling new message")
 			message := msg.Decode(messageAsBytes)
+			log("Code:", message.Code)
 			switch message.Code {
 			case msg.NextPhase.Code:
 				attackPhase += 1
@@ -1451,14 +1452,13 @@ func handleMessages() {
 				midRollbackDone = true
 				log("Set midRollback = true")
 			case msg.GhostRoot.Code:
-				go func() {
-					ghostRoot = common.BytesToHash(message.Content)
+				go func(ghostRoot common.Hash) {
 					err := (*stateCache).TrieDB().Commit(ghostRoot, true, nil)
 					if err != nil {
 						fatal(err, "Cannot commit root at ghost block, root =", ghostRoot)
 					}
 					log("Committed trie root, root =", ghostRoot)
-				}()
+				}(common.BytesToHash(message.Content))
 
 
 			/*
