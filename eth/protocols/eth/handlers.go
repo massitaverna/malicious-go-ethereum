@@ -192,10 +192,11 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 
 		if bridge.DoingSync() || bridge.DoingDelivery() {
-			if bridge.SteppingDone() {
-				bridge.SkeletonAndPivotingDelay()
-			} else if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 10 {
+			if !bridge.SteppingDone() && int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 10 {
 				time.Sleep(1*time.Second)
+			}
+			if bridge.MidRollbackDone() {
+				bridge.SkeletonAndPivotingDelay()
 			}
 		}
 	}
@@ -215,9 +216,9 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			query.Amount = 1
 
 			if bridge.SteppingDone() {
-				bridge.SkeletonAndPivotingDelay()
-
-				if !bridge.MidRollbackDone() && int(query.Origin.Number) < 192*bridge.SteppingBatches() {
+				if bridge.MidRollbackDone() {
+					bridge.SkeletonAndPivotingDelay()
+				} else if int(query.Origin.Number) < 192*bridge.SteppingBatches() {
 					bridge.MidRollback()
 					time.Sleep(500*time.Millisecond) // Leave some time to the other peer to receive and process msg.MidRollback
 					return nil
