@@ -41,6 +41,7 @@ type Orchestrator struct {
 	mu sync.Mutex
 	syncOps int
 	syncCh chan struct{}
+	prngInitialised chan struct{}
 	syncChRead bool
 	masterPeerSet bool
 	predictionOnly bool
@@ -88,6 +89,7 @@ func New(errc chan error) *Orchestrator {
 		firstMasterSet: false,
 		syncOps: 0,
 		syncCh: make(chan struct{}),
+		prngInitialised: make(chan struct{}),
 		syncChRead: false,
 		masterPeerSet: false,
 		predictionOnly: false,
@@ -308,7 +310,7 @@ func (o *Orchestrator) leadAttack() {
 		fmt.Println("")
 	}()
 
-	o.syncCh <- struct{}{}	// Announce PRNG has been initialised
+	o.prngInitialised <- struct{}{}	// Announce PRNG has been initialised
 
 	<-o.syncCh				// Wait for blockX, blockY to be found
 	fmt.Printf("Found x, y = %d, %d\n", o.blockX, o.blockY)
@@ -711,7 +713,7 @@ func (o *Orchestrator) handleMessages() {
 				go func() {
 					currentHead := int(binary.BigEndian.Uint64(message.Content))
 					n := int(math.Ceil(float64(currentHead+60)/192.0)) + 1
-					<-o.syncCh		// Wait for PRNG initialisation
+					<-o.prngInitialised		// Wait for PRNG initialisation
 
 					C := 10		// Force C > 10
 					x := 0
