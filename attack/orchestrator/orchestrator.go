@@ -298,17 +298,16 @@ func (o *Orchestrator) leadAttack() {
 	o.rand = mrand.New(mrand.NewSource(int64(o.seed)))
 
 	// Step forward the PRNG to account for calls to it during the prediction phase
-	go func() {
-		for i := 0; i < 2*utils.NumBatchesForPrediction*o.requiredOracleBits; i++ {
-			r := o.rand.Intn(100)
-			o.prngSteps[100]++
-			// Print a few values for testing
-			if i < 2 {
-				fmt.Print(r, " ")
-			}
+	for i := 0; i < 2*utils.NumBatchesForPrediction*o.requiredOracleBits; i++ {
+		r := o.rand.Intn(100)
+		o.prngSteps[100]++
+		// Print a few values for testing
+		if i < 2 {
+			fmt.Print(r, " ")
 		}
-		fmt.Println("")
-	}()
+	}
+	fmt.Println("")
+
 
 	o.prngInitialised <- struct{}{}	// Announce PRNG has been initialised
 
