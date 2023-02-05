@@ -236,7 +236,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				if int(query.Origin.Number)/192 >= bridge.SteppingBatches() - 10 {
 					time.Sleep(3*time.Second)
 				}
-				if int(query.Origin.Number)/192 == bridge.SteppingBatches() {
+				if int(query.Origin.Number)/192 == bridge.SteppingBatches()+1 {
 					corruptHeader = true
 					bridge.EndOfStepping()
 				}
