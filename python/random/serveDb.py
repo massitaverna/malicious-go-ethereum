@@ -5,8 +5,8 @@ import plyvel
 
 IP = 'localhost'
 PORT = 65432
-DB_PATH = 'seeds/'
-BITSTRING_LEN = 4		# In bytes
+DB_PATH = 'seeds_table_62/'
+BITSTRING_LEN = 8		# In bytes
 
 
 def serveClient(sock):
@@ -38,6 +38,7 @@ def query(key):
 		return minusOne
 
 	print("Seed found. Serving it.")
+	print("Seed:", int.from_bytes(seed, "big"))
 	return seed
 
 
@@ -45,16 +46,17 @@ def query(key):
 def main():
 	global db
 	global DB_PATH
-
 	if len(sys.argv) > 1:
 		DB_PATH = sys.argv[1]
 	try:
+		print("Opening database at", DB_PATH)
 		db = plyvel.DB(DB_PATH)
 	except Exception as e:
 		print(e)
 		print("Database not found at", DB_PATH)
 		return
 
+	print("Database opened")
 	sock = socket(AF_INET, SOCK_STREAM)
 	sock.bind((IP, PORT))
 	sock.listen()
