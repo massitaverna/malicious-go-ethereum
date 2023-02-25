@@ -41,7 +41,7 @@ type Orchestrator struct {
 	mu sync.Mutex
 	syncOps int
 	syncCh chan struct{}
-	prngInitialised chan struct{}
+	prngSyncCh chan struct{}
 	syncChRead bool
 	masterPeerSet bool
 	predictionOnly bool
@@ -89,7 +89,7 @@ func New(errc chan error) *Orchestrator {
 		firstMasterSet: false,
 		syncOps: 0,
 		syncCh: make(chan struct{}),
-		prngInitialised: make(chan struct{}),
+		prngSyncCh: make(chan struct{}),
 		syncChRead: false,
 		masterPeerSet: false,
 		predictionOnly: false,
@@ -309,9 +309,9 @@ func (o *Orchestrator) leadAttack() {
 	fmt.Println("")
 
 
-	o.prngInitialised <- struct{}{}	// Announce PRNG has been initialised
+	o.prngSyncCh <- struct{}{}	// Announce PRNG has been initialised
 
-	<-o.syncCh				// Wait for blockX, blockY to be found
+	<-o.prngSyncCh				// Wait for blockX, blockY to be found
 	fmt.Printf("Found x, y = %d, %d\n", o.blockX, o.blockY)
 	fmt.Println("Set target head:", o.targetHead)
 
@@ -712,7 +712,7 @@ func (o *Orchestrator) handleMessages() {
 				go func() {
 					currentHead := int(binary.BigEndian.Uint64(message.Content))
 					n := int(math.Ceil(float64(currentHead+60)/192.0)) + 1
-					<-o.prngInitialised		// Wait for PRNG initialisation
+					<-o.prngSyncCh		// Wait for PRNG initialisation
 
 					C := 10		// Force C > 10
 					x := 0
@@ -731,7 +731,7 @@ func (o *Orchestrator) handleMessages() {
 					o.blockX = x
 					o.blockY = y
 					o.targetHead = utils.BatchSize * (n-1) + x + 1
-					o.syncCh <- struct{}{}
+					o.prngSyncCh <- struct{}{}
 
 					content := make([]byte, 4)
 					binary.BigEndian.PutUint32(content, uint32(C))
