@@ -32,6 +32,8 @@ const (
 	SeedSize = 4					// The seed is always 4 bytes long
 
 	ReadBufferSize = 32*1024*1024
+	
+	IpNetworkForTesting = "3.0.0.0/8"
 )
 
 var (
