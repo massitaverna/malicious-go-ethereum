@@ -264,12 +264,13 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 			var netRestrict netutil.Netlist
 			netRestrict.Add(strings.Split(victim.RemoteAddr().String(), ":")[0] + "/32")
 			netRestrict.Add("127.0.0.1/32")
-			netRestrict.Add("3.0.0.0/8")				// The idea is to allow some honest nodes to connect to us,
-														// otherwise we will not have information about the honest chain,
-														// but not too many to avoid wasting time handling peering requests
-														// we don't care about. Wasting time may result in not enough time
-														// for a dropped peer to reconnect to the victim during prediction.
-														// In our testing infrastructure, honest nodes are on 3.0.0.0/8.
+			netRestrict.Add(utils.IpNetworkForTesting)				// The idea is to allow some honest nodes to connect to us,
+												// otherwise we will not have information about the honest chain,
+												// but not too many to avoid wasting time handling peering requests
+												// we don't care about. Wasting time may result in not enough time
+												// for a dropped peer to reconnect to the victim during prediction.
+												// In our testing infrastructure, honest nodes are on the network
+												// utils.IpNetworkForTesting.
 			p2pserver.NetRestrict = &netRestrict
 			log("Set network restrictions:", p2pserver.NetRestrict)
 			
