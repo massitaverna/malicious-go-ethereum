@@ -513,7 +513,7 @@ func getOptimizeScriptPath() (string, error) {
 		return "", err
 	}
 	pathSeparator := string(os.PathSeparator)
-	path := home + pathSeparator + "scripts" + pathSeparator + "optimization.py"
+	path := "scripts" + pathSeparator + "optimization.py"
 	return path, nil
 }
 
