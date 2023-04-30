@@ -21,6 +21,8 @@ const (
 	PredictionPhase = AttackPhase(2)
 	SyncPhase = AttackPhase(3)
 	DeliveryPhase = AttackPhase(4)
+	SnapReenablementPhase = AttackPhase(5)
+	OverflowPhase = AttackPhase(6)
 
 	BatchSize = 192
 	MinFullyVerifiedBlocks = 88
@@ -76,6 +78,10 @@ func (phase AttackPhase) ToChainType() ChainType {
 		return TrueChain
 	case DeliveryPhase:
 		return FakeChain
+	case SnapReenablementPhase:
+		return TrueChain
+	case OverflowPhase:
+		return TrueChain
 	default:
 		return InvalidChainType
 	}
@@ -93,6 +99,10 @@ func (phase AttackPhase) String() string {
 		return "sync"
 	case DeliveryPhase:
 		return "delivery"
+	case SnapReenablementPhase:
+		return "snap re-enablement"
+	case OverflowPhase:
+		return "pivot overflow"
 	default:
 		panic(fmt.Errorf("Invalid attack phase: %d", byte(phase)))
 

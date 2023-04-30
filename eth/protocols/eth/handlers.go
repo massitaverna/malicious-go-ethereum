@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"bytes"
 	"time"
+	"math"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -199,6 +200,13 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 				bridge.SkeletonAndPivotingDelay()
 			}
 		}
+
+		if bridge.DoingSnapReenablement() {
+			// Lower query origin so that we can find two headers in the true chain
+			time.Sleep(3*time.Second)
+			query.Origin.Number -= 384
+			log.Info("Lowered origin number", "before", query.Origin.Number+384, "after", query.Origin.Number)
+		}
 	}
 
 	skeleton := false
@@ -208,7 +216,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		skeleton = true
 
 		// Give more time to peers to reconnect to victim
-		if bridge.DoingPrediction() {
+		if bridge.DoingPrediction() || bridge.DoingSnapReenablement() {
 			time.Sleep(3*time.Second)
 		}
 
@@ -247,10 +255,14 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 					query.Amount = 6
 				}
 			}
-			if query.Amount != 128 {
-				log.Info("Providing fewer skeleton headers", "amount", query.Amount)
-			}
 		}
+
+		if bridge.DoingSnapReenablement() || bridge.DoingOverflow() {
+			query.Amount = 1
+		}
+	}
+	if query.Amount != 128 {
+		log.Info("Providing fewer skeleton headers", "amount", query.Amount)
 	}
 
 
@@ -305,6 +317,42 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 			origin.Time = origin.Time + 1
 			corruptHeader = false
 			log.Info("Corrupting header", "number", origin.Number)
+		}
+
+		if queryForMaster && bridge.DoingSnapReenablement() {
+			origin = types.CopyHeader(origin)
+			origin.Number.Add(origin.Number, big.NewInt(80000))
+			log.Info("Adding 80000 to heights for queryForMaster")
+		}
+
+		if queryForMaster && bridge.DoingOverflow() {
+			origin = types.CopyHeader(origin)
+			if origin.Number.Uint64() == headForMasterQuery {
+				// Head
+				origin.Number.SetUint64(math.MaxUint64)
+			} else {
+				// Pivot
+				origin.Number.SetUint64(math.MaxUint64 - 64)
+			}
+			log.Info("Altering block number", "number", origin.Number)
+		}
+
+		if pivoting && bridge.DoingSnapReenablement() {
+			origin = types.CopyHeader(origin)
+			origin.Number.Add(origin.Number, big.NewInt(384))
+			log.Info("Bringing back block number to what requested for pivoting request", "number", origin.Number)
+		}
+
+		if pivoting && bridge.DoingOverflow() {
+			fakeHeader = types.CopyHeader(bridge.Latest())
+			if origin.Number.Uint64() == pivotNumber {
+				// Pivot
+				fakeHeader.Number.SetUint64(pivotNumber)
+			} else {
+				// Pivot confirmer
+				fakeHeader.Number.SetUint64(pivotNumber + 55)
+			}
+			origin = fakeHeader
 		}
 
 		if rlpData, err := rlp.EncodeToBytes(origin); err != nil {
@@ -423,6 +471,10 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 		bridge.DelayBeforeServingBatch()
 		 	}
 
+		 	if bridge.DoingSnapReenablement() {
+		 		bridge.ServedBatchInSnapReenablement()
+		 	}
+
 		 	/*
 		 	This is WRONG, as the master peer only serves some of the batches.
 		 	
@@ -457,14 +509,20 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		// Prediction - Allow enough time to peers to reconnect to the victim
 		// Before batch stepping - Leave (generous) time to orch to compute the number of stepping batches
 		// After stepping, during mid rollback - Allow time to kicked peer to reconnect to the victim
-		if !bridge.MidRollbackDone() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
-		 query.Amount==1 && !bridge.AncestorFound() {
+		// Snap Re-enablement - Allow enough time to the other peer to reconnect to the victim
+		if (!bridge.MidRollbackDone() || bridge.DoingSnapReenablement()) &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
 			time.Sleep(3*time.Second)
 		}
 		// Cheat about common ancestor
-		if bridge.DoingSync() && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
-		 query.Amount==1 && !bridge.AncestorFound() && bridge.SteppingDone() {
-			fakeCommonAncestor := bridge.AncestorMidPoint()
+		if (bridge.DoingSync() && birdge.SteppingDone() || bridge.DoingSnapReenablement()) &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
+		 	var fakeCommonAncestor uint64
+			if bridge.DoingSync() {
+				fakeCommonAncestor = bridge.AncestorMidPoint()
+			} else {
+				fakeCommonAncestor = bridge.Latest().Number - 1000
+			}
 		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
 
 			var newHeaders []rlp.RawValue
@@ -539,6 +597,11 @@ func handleGetBlockBodies66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+
+	if bridge.DoingOverflow() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		return nil
+	}
+
 	response := ServiceGetBlockBodiesQuery(backend.Chain(), query.GetBlockBodiesPacket)
 	return peer.ReplyBlockBodiesRLP(query.RequestId, response)
 }
@@ -607,6 +670,11 @@ func handleGetReceipts66(backend Backend, msg Decoder, peer *Peer) error {
 	if err := msg.Decode(&query); err != nil {
 		return fmt.Errorf("%w: message %v: %v", errDecode, msg, err)
 	}
+
+	if bridge.DoingOverflow() && bridge.IsVictim(peer.Peer.ID().String()[:8]) {
+		return nil
+	}
+
 	response := ServiceGetReceiptsQuery(backend.Chain(), query.GetReceiptsPacket)
 	return peer.ReplyReceiptsRLP(query.RequestId, response)
 }
