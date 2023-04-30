@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"time"
 	"math"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core"
@@ -344,7 +345,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		}
 
 		if pivoting && bridge.DoingOverflow() {
-			fakeHeader = types.CopyHeader(bridge.Latest())
+			fakeHeader := types.CopyHeader(bridge.Latest())
 			if origin.Number.Uint64() == pivotNumber {
 				// Pivot
 				fakeHeader.Number.SetUint64(pivotNumber)
@@ -471,10 +472,6 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 		bridge.DelayBeforeServingBatch()
 		 	}
 
-		 	if bridge.DoingSnapReenablement() {
-		 		bridge.ServedBatchInSnapReenablement()
-		 	}
-
 		 	/*
 		 	This is WRONG, as the master peer only serves some of the batches.
 		 	
@@ -515,13 +512,13 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 			time.Sleep(3*time.Second)
 		}
 		// Cheat about common ancestor
-		if (bridge.DoingSync() && birdge.SteppingDone() || bridge.DoingSnapReenablement()) &&
+		if (bridge.DoingSync() && bridge.SteppingDone() || bridge.DoingSnapReenablement() || bridge.DoingOverflow()) &&
 		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
 		 	var fakeCommonAncestor uint64
 			if bridge.DoingSync() {
 				fakeCommonAncestor = bridge.AncestorMidPoint()
 			} else {
-				fakeCommonAncestor = bridge.Latest().Number - 1000
+				fakeCommonAncestor = bridge.Latest().Number.Uint64() - 1000
 			}
 		 	log.Info("Corrupting headers", "fakeCommonAncestor", fakeCommonAncestor)
 
