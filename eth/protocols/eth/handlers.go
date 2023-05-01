@@ -150,7 +150,7 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 	maxNonCanonical := uint64(100)
 
 	queryForMaster := false
-	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Amount == 2 && query.Skip == 63 && query.Reverse {
+	if hashMode /*&& query.Origin.Hash == bridge.Latest().Hash()*/ && query.Skip == 63 && query.Reverse {
 		//bridge.SetMasterPeer()
 		bridge.SetVictimIfNone(peer.Peer, peer.td)
 		if bridge.IsVictim(peer.Peer.ID().String()[:8]) {
@@ -261,9 +261,10 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		if bridge.DoingSnapReenablement() || bridge.DoingOverflow() {
 			query.Amount = 1
 		}
-	}
-	if query.Amount != 128 {
-		log.Info("Providing fewer skeleton headers", "amount", query.Amount)
+
+		if query.Amount != 128 {
+			log.Info("Providing fewer skeleton headers", "amount", query.Amount)
+		}
 	}
 
 
@@ -300,6 +301,14 @@ func serviceNonContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBloc
 		} else {
 			origin = chain.GetHeaderByNumber(query.Origin.Number)
 		}
+
+		// Ancestor span search: serve something to avoid being dropped by victim
+		if (bridge.DoingSnapReenablement() || bridge.DoingOverflow()) && bridge.IsVictim(peer.Peer.ID().String()[:8]) &&
+		 !bridge.AncestorFound() && query.Skip > 0 && !query.Reverse && !hashMode && !skeleton {
+		 	origin = types.CopyHeader(bridge.Latest())
+		 	origin.Number.SetUint64(query.Origin.Number)
+		}
+
 		if origin == nil{
 			break
 		}

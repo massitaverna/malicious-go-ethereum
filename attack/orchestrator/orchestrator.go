@@ -299,12 +299,8 @@ func (o *Orchestrator) leadAttack() {
 
 	// Step forward the PRNG to account for calls to it during the prediction phase
 	for i := 0; i < 2*utils.NumBatchesForPrediction*o.requiredOracleBits; i++ {
-		r := o.rand.Intn(100)
+		o.rand.Intn(100)
 		o.prngSteps[100]++
-		// Print a few values for testing
-		if i < 2 {
-			fmt.Print(r, " ")
-		}
 	}
 	fmt.Println("")
 
