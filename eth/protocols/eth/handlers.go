@@ -458,7 +458,17 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		if !query.Reverse {
 			from = from + count - 1
 		}
+
 		headers := chain.GetHeadersFrom(from, count)
+		
+		if (bridge.DoingSnapReenablement() || bridge.DoingOverflow()) &&
+		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
+		 	header := types.CopyHeader(bridge.Latest())
+		 	header.Number.SetUint64(from)
+		 	rlpData, _ := rlp.EncodeToBytes(header)
+		 	headers = append(headers, rlpData)
+		}
+
 		log.Info("Got headers for query", "amount", query.Amount, "from", query.Origin.Number, "len_headers", len(headers), "peer", peer.Peer.ID().String()[:8])
 		if !query.Reverse {
 			for i, j := 0, len(headers)-1; i < j; i, j = i+1, j-1 {

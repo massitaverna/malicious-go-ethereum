@@ -338,20 +338,6 @@ func (o *Orchestrator) leadAttack() {
 
 	fmt.Println("Stepping done")
 
-	// TODO: Tune the PRNG
-
-	//<-o.prngTuned
-
-	/*
-	// Now, account for next 11 honest batches
-	fmt.Println("Accounting for 11 repeated batches")
-	for i := 0; i < 2*11; i++ {
-		fmt.Printf("%d ", o.rand.Intn(100))
-		o.prngSteps[100]++
-	}
-	fmt.Println("")
-	*/
-
 
 	if o.honestHashrate >= 0 {
 		buildchain.SetHashrateLimit(int64(math.Round(o.fraction * o.honestHashrate)))
