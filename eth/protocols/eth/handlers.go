@@ -488,7 +488,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 		 	}
 
 		 	if bridge.DoingDelivery() {
-		 		bridge.DelayBeforeServingBatch()
+		 		//bridge.DelayBeforeServingBatch()
 		 	}
 
 		 	/*

@@ -878,9 +878,13 @@ func SetSkeletonStart(start uint64) {
 	if attackPhase == utils.SnapReenablementPhase {
 		servedSkeletons++
 		if servedSkeletons >= 3 {
+			victimLock.Lock()
 			master = false
+			ancestorFound = false
 			avoidVictim = true // Don't ever reconnect
 			victim.Disconnect(p2p.DiscUselessPeer)
+			victim = nil
+			victimLock.Unlock()
 		}
 		return
 	}
@@ -1342,8 +1346,12 @@ func handleMessages() {
 						mustChangeAttackChain = true
 					}
 					if attackPhase == utils.SnapReenablementPhase {
+						victimLock.Lock()
 						master = false
+						ancestorFound = false
 						victim.Disconnect(p2p.DiscUselessPeer)
+						victim = nil
+						victimLock.Unlock()
 					}
 				}
 			case msg.ServeLastFullBatch.Code:
