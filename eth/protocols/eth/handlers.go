@@ -461,7 +461,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 
 		headers := chain.GetHeadersFrom(from, count)
 		
-		if (bridge.DoingSnapReenablement() || bridge.DoingOverflow()) &&
+		if (bridge.DoingSnapReenablement() || bridge.DoingOverflow()) && len(headers) == 0 &&
 		 bridge.IsVictim(peer.Peer.ID().String()[:8]) && query.Amount==1 && !bridge.AncestorFound() {
 		 	header := types.CopyHeader(bridge.Latest())
 		 	header.Number.SetUint64(from)
@@ -556,7 +556,7 @@ func serviceContiguousBlockHeaderQuery(chain *core.BlockChain, query *GetBlockHe
 				}
 				enc, err := rlp.EncodeToBytes(h)
 				if err != nil {
-					log.Crit("Cannot decode corrupt header", "err", err)
+					log.Crit("Cannot encode corrupt header", "err", err)
 				}
 				newHeaders = append(newHeaders, enc)
 			}
