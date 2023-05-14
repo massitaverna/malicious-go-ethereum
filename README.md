@@ -11,6 +11,7 @@ Public disclosure at:
 ## Branches
 
 The project is a fork of the official [Go Ethereum repository](https://github.com/ethereum/go-ethereum).
+Most of the code comes from there. We made changes on top of it to implement our attacks.
 
 The following branches implement the attacks in the paper:
 * `ghost-snap`: Implementation of the Ghost-SNaP attack
