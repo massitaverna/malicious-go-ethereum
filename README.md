@@ -4,6 +4,10 @@ This repository contains the implementation of the attacks
 described in the paper _"Snapping Snap Sync: Practical Attacks on Go Ethereum Synchronising Nodes"_
 by Massimiliano Taverna and Kenneth G. Paterson, from ETH Zurich.
 
+Paper at:
+
+Public disclosure at:
+
 ## Branches
 
 The project is a fork of the official Go Ethereum repository.
