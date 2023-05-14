@@ -1,7 +1,7 @@
 # Malicious Go Ethereum
 
 This repository contains the implementation of the attacks
-described in the paper "Snapping Snap Sync: Practical Attacks on Go Ethereum Synchronising Nodes"
+described in the paper _"Snapping Snap Sync: Practical Attacks on Go Ethereum Synchronising Nodes"_
 by Massimiliano Taverna and Kenneth G. Paterson, from ETH Zurich.
 
 ## Branches
@@ -16,7 +16,7 @@ The following branches implement the attacks in the paper:
 ## Design overview
 The software design involves three main components.
 An attack orchestrator (`attack/orchestrator`) moves forward the attacks through their multiple phases.
-A chain builder (`attack/buildchain`) receives commands from the orchestrator and build the malicious chains necessary for the attacks.
+A chain builder (`attack/buildchain`) receives commands from the orchestrator and builds the malicious chains necessary for the attacks.
 A bridge (`attack/bridge`) allows for communications between the orchestrator and the main Go Ethereum software, enabling malicious node behaviour.
 
 ## No-responsibility disclaimer
