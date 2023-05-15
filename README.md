@@ -4,7 +4,7 @@ This repository contains the implementation of the attacks
 described in the paper _"Snapping Snap Sync: Practical Attacks on Go Ethereum Synchronising Nodes"_
 by Massimiliano Taverna and Kenneth G. Paterson, from ETH Zurich.
 
-Paper [here](https://github.com/massitaverna/malicious-go-ethereum/blob/1247c7241f244bc35dd09cf1e16a9a8311efaafd/paper.pdf)
+Paper [here](https://appliedcrypto.ethz.ch/content/dam/ethz/special-interest/infk/inst-infsec/appliedcrypto/research/TavernaPaterson-SnappingSnapSync.pdf)
 
 Public disclosure [here](https://twitter.com/kennyog/status/1658057298634309638?s=20)
 
